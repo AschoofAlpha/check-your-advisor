@@ -1,0 +1,9 @@
+# Normalise to LF in the repository. The test suite reads its own fixtures and
+# the CSV loaders sniff encodings; a checkout that flips line endings on the way
+# in is one more thing that can differ between a maintainer's machine and a
+# contributor's for no reason anybody chose.
+* text=auto eol=lf
+
+# CSV templates are handed to Excel, which on Windows wants CRLF. The loader
+# accepts either, but a template that opens wrong is a bad first impression.
+*.csv text eol=crlf

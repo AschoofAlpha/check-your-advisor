@@ -1,0 +1,16 @@
+{
+  "name": "check-your-advisor",
+  "description": "Report what a principal investigator's publication record shows about being their student — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern. Every count prints with its denominator. Citation counts, an h-index and one composite score out of 100 are computed under a weight table the report prints verbatim and the user can edit; several corpora can be laid side by side, ranked, and star-banded. No percentile, no letter grade, no fitted trend, and no ordering of people. Journal impact factor, JCR quartile, CAS partition and the advisor's graduate roster are joined from CSV tables the user fills in by hand — the schemas, the worklist and the join ship here, the scraping of a subscription database does not.",
+  "version": "0.2.0",
+  "license": "MIT",
+  "keywords": [
+    "pubmed",
+    "advisor",
+    "graduate-school",
+    "bibliometrics",
+    "research-integrity"
+  ],
+  "author": {
+    "name": "AschoofAlpha"
+  }
+}
