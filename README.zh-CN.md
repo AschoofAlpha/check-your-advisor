@@ -1,5 +1,10 @@
 # 查导师 Check Your Advisor
 
+[![PyPI](https://img.shields.io/pypi/v/check-your-advisor)](https://pypi.org/project/check-your-advisor/)
+[![Python](https://img.shields.io/pypi/pyversions/check-your-advisor)](https://pypi.org/project/check-your-advisor/)
+[![License](https://img.shields.io/pypi/l/check-your-advisor)](LICENSE)
+[![Dependencies](https://img.shields.io/badge/%E4%BE%9D%E8%B5%96-%E6%97%A0-brightgreen)](pyproject.toml)
+
 *[English](README.md)*
 
 你要选硕导或博导。手里只有一个名字、一个实验室自己写的主页，没有任何办法核实。

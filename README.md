@@ -1,5 +1,10 @@
 # Check Your Advisor
 
+[![PyPI](https://img.shields.io/pypi/v/check-your-advisor)](https://pypi.org/project/check-your-advisor/)
+[![Python](https://img.shields.io/pypi/pyversions/check-your-advisor)](https://pypi.org/project/check-your-advisor/)
+[![License](https://img.shields.io/pypi/l/check-your-advisor)](LICENSE)
+[![Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen)](pyproject.toml)
+
 *[中文说明](README.zh-CN.md)*
 
 You are choosing a PhD or master's advisor. You have a name, a lab page written
