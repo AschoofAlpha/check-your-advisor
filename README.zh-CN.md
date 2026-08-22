@@ -102,14 +102,26 @@ python scripts/run.py profile --output-dir ./record \
 
 ## 安装
 
-作为 Claude Code 技能：
+当命令行工具用：
 
 ```bash
-git clone https://github.com/<owner>/check-your-advisor.git \
+pip install check-your-advisor
+check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
+```
+
+当 Claude Code 技能用 —— clone 到技能加载器会看的位置，让 `SKILL.md` 和代码待在一起：
+
+```bash
+git clone https://github.com/AschoofAlpha/check-your-advisor.git \
     ~/.claude/skills/check-your-advisor
 ```
 
-也可以当普通命令行工具直接用，`scripts/run.py` 是唯一入口，不需要安装。
+也可以 clone 下来直接跑 `scripts/run.py`，它是唯一入口，完全不用装。
+
+pip 包**不声明任何依赖**，这不是漏写：装完之后的干净虚拟环境里只有这个包、pip 和
+setuptools，再无其他。两个可选 extras 都有经过测试的降级路径 ——
+`pip install "check-your-advisor[pdf]"` 启用 PyMuPDF 的 PDF 隔离，
+`[xlsx]` 启用 openpyxl 导出，`[all]` 两个都要。
 
 ## 可选依赖
 

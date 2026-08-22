@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "check-your-advisor"
+version = "0.2.0"
+description = "Read what PubMed records about a researcher and report it back as facts with denominators — first-author slots, time to a first slot, turnover, byline position. 查导师：把发表记录读成带分母的事实，不替你下结论。"
+readme = { file = "README.md", content-type = "text/markdown" }
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "AschoofAlpha" }]
+keywords = [
+    "pubmed",
+    "advisor",
+    "graduate-school",
+    "bibliometrics",
+    "research-integrity",
+    "scientometrics",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Education",
+    "Natural Language :: Chinese (Simplified)",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Text Processing :: Indexing",
+]
+
+# No `dependencies` key, and that is the point rather than an omission. Every
+# import in this package is from the standard library, and the test suite proves
+# it: `python tests/run_all.py --block-third-party` installs an import hook that
+# makes requests, urllib3, pandas, numpy, matplotlib, fitz and openpyxl
+# unimportable, and 1922 of 1925 assertions still pass. Adding a dependency here
+# would make that suite a claim nobody checks.
+
+[project.optional-dependencies]
+# Both are genuinely optional and both have a tested fallback path. PyMuPDF is
+# AGPL-3.0 and this package is MIT, which is why it is not a hard dependency:
+# without it a downloaded PDF is still checked for the `%PDF-` magic bytes, it
+# just cannot be quarantined by content. openpyxl only decides whether the
+# corpus export is .xlsx or a timestamped .csv.
+pdf = ["PyMuPDF>=1.23"]
+xlsx = ["openpyxl>=3.1"]
+all = ["PyMuPDF>=1.23", "openpyxl>=3.1"]
+
+[project.urls]
+Homepage = "https://github.com/AschoofAlpha/check-your-advisor"
+Repository = "https://github.com/AschoofAlpha/check-your-advisor"
+Issues = "https://github.com/AschoofAlpha/check-your-advisor/issues"
+"Chinese README" = "https://github.com/AschoofAlpha/check-your-advisor/blob/main/README.zh-CN.md"
+
+[project.scripts]
+check-your-advisor = "check_your_advisor.cli:main"
+
+[tool.setuptools]
+# The package lives under `scripts/` because this repository is also a Claude
+# Code skill, where `SKILL.md` sits at the root and the code sits beside it.
+# Moving the package to the root would break the skill layout; telling setuptools
+# where to look costs one line and breaks nothing.
+package-dir = { "" = "scripts" }
+packages = ["check_your_advisor", "check_your_advisor.profile"]

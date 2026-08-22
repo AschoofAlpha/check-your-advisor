@@ -119,15 +119,29 @@ either — the roster narrows the missing group, it does not close it.
 
 ## Install
 
-As a Claude Code skill:
+As a command-line tool:
 
 ```bash
-git clone https://github.com/<owner>/check-your-advisor.git \
+pip install check-your-advisor
+check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
+```
+
+As a Claude Code skill — clone it where the skill loader looks, so `SKILL.md`
+lands beside the code:
+
+```bash
+git clone https://github.com/AschoofAlpha/check-your-advisor.git \
     ~/.claude/skills/check-your-advisor
 ```
 
-Or run it directly as a CLI from anywhere — `scripts/run.py` is the single
-entry point and needs no installation.
+Or run `scripts/run.py` straight out of a clone; it is the single entry point
+and needs no installation at all.
+
+The pip package declares **no dependencies**, which is not an oversight: a clean
+virtualenv with this installed contains this package, pip and setuptools, and
+nothing else. Two extras exist and both have a tested fallback —
+`pip install "check-your-advisor[pdf]"` for PyMuPDF-backed PDF quarantine,
+`[xlsx]` for openpyxl export, `[all]` for both.
 
 ## Optional extras
 
