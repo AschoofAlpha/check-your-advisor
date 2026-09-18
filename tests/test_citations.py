@@ -615,6 +615,169 @@ with _tempfile.TemporaryDirectory() as _tmp:
           [3, 3, 3])
 
 
+# ----------------------------------------------------------------------
+# The fetch cache (`--max-age-days N`, per source)
+#
+# `reuse` above carries a whole *record* forward out of the last output file.
+# This carries one *source's answer* forward out of SQLite, which is a different
+# saving: a paper whose count OpenAlex supplied last week costs no request at
+# all, and `journal-risk`'s three-per-journal walk can hit on one source and
+# still ask the other two.
+#
+# Two things are non-negotiable and most of what follows is about them:
+#   - a cached answer arrives with the day it was really collected, so the
+#     record written today is dated last week if that is when the count was read
+#   - a cache hit opens no socket, which is checkable here because StubClient
+#     records every URL it was asked for
+# ----------------------------------------------------------------------
+print("\nFetch cache (--max-age-days N, per source)")
+
+from check_your_advisor.cache import FetchCache  # noqa: E402
+
+# Relative to the wall clock, not to a fixed date: `citation_record` has no
+# `now` seam — it asks the cache, which asks the clock — so a hard-coded 2026
+# fixture would start failing the day the window it sits in slides past it.
+_CACHE_NOW = _dt.now()
+
+
+def _stamp(days_ago: float) -> str:
+    return (_CACHE_NOW - _td(days=days_ago)).isoformat(timespec="seconds")
+
+
+# A first run with an empty cache behaves exactly as it always did, and leaves
+# the answer behind under a key naming the source that gave it.
+_cache = FetchCache(":memory:")
+_client = StubClient({OPENALEX: ok({"cited_by_count": 42})})
+_rec = citations.citation_record(_client, paper(), cache=_cache, max_age_days=30)
+check("a cold cache fetches normally", _rec["citation_count"], 42)
+check("...and the request did go out", _client.sources, ["openalex"])
+check("the answer is filed under the source that gave it",
+      _cache.get("citations.openalex", f"doi:{DOI}", 30)["value"], 42)
+check("...and not under a source that was never asked",
+      _cache.get("citations.semantic_scholar", f"doi:{DOI}", 30), None)
+
+# The second run is the whole point: same paper, a client that would answer
+# differently, and no request made.
+_client2 = StubClient({OPENALEX: ok({"cited_by_count": 999})})
+_rec2 = citations.citation_record(_client2, paper(), cache=_cache, max_age_days=30)
+check("a warm cache serves the count", _rec2["citation_count"], 42)
+check("...without opening a socket", _client2.calls, [])
+check("...and still names the source the answer came from", _rec2["source"], "openalex")
+check("...and the record is dated when the count was collected, not now",
+      _rec2["fetched_at"], _rec["fetched_at"])
+
+# A stamp written by an earlier run survives into a record written today. This
+# is the same rule `reuse` follows, enforced one layer down.
+_cache.put("citations.openalex", "doi:10.1/old", 7, fetched_at=_stamp(3))
+_old = citations.citation_record(StubClient(), paper(pmid="77", doi="10.1/old"),
+                                 cache=_cache, max_age_days=30)
+check("a record served from cache carries the original collection date",
+      _old["fetched_at"], _stamp(3))
+check("...which is not today", _old["fetched_at"].startswith(
+    _dt.now().strftime("%Y-%m-%d")), False)
+check("...and the count is the cached one", _old["citation_count"], 7)
+
+# Per-source keys, seen from the chain rather than from the cache: an answer
+# filed under Semantic Scholar does not stop OpenAlex being asked first.
+_cache2 = FetchCache(":memory:")
+_cache2.put("citations.semantic_scholar", f"doi:{DOI}", 5, fetched_at=_stamp(1))
+_mixed = StubClient({OPENALEX: Response(404, {}, b"")})
+_mrec = citations.citation_record(_mixed, paper(), cache=_cache2, max_age_days=30)
+check("OpenAlex is still asked when only Semantic Scholar is cached",
+      _mixed.sources, ["openalex"])
+check("...and Semantic Scholar answers from cache without being asked",
+      (_mrec["citation_count"], _mrec["source"]), (5, "semantic_scholar"))
+check("...carrying its own date", _mrec["fetched_at"], _stamp(1))
+
+# Europe PMC is keyed on the PMID when there is one, because that is what the
+# request is actually built from.
+_cache3 = FetchCache(":memory:")
+_cache3.put("citations.europe_pmc", f"pmid:{PMID}", 8, fetched_at=_stamp(2))
+_epmc_client = StubClient({OPENALEX: Response(404, {}, b""), S2: Response(404, {}, b"")})
+_erec = citations.citation_record(_epmc_client, paper(), cache=_cache3, max_age_days=30)
+check("Europe PMC's row is keyed on the PMID the query is built from",
+      (_erec["citation_count"], _erec["source"]), (8, "europe_pmc"))
+check("...and its stamp travels too", _erec["fetched_at"], _stamp(2))
+
+# Expiry is `--max-age-days` and nothing else. At the default the cache is not
+# consulted at all, which keeps "the default refetches everything" true.
+_cache4 = FetchCache(":memory:")
+_cache4.put("citations.openalex", f"doi:{DOI}", 42, fetched_at=_stamp(1))
+_off = StubClient({OPENALEX: ok({"cited_by_count": 999})})
+check("max_age_days=0 does not consult the cache",
+      citations.citation_record(_off, paper(), cache=_cache4,
+                                max_age_days=0)["citation_count"], 999)
+check("...so the request went out", len(_off.calls), 1)
+
+_stale = StubClient({OPENALEX: ok({"cited_by_count": 999})})
+_cache4.put("citations.openalex", f"doi:{DOI}", 42, fetched_at=_stamp(400))
+check("a row older than the window is refetched",
+      citations.citation_record(_stale, paper(), cache=_cache4,
+                                max_age_days=30)["citation_count"], 999)
+check("...and the refetched row is redated to today",
+      _cache4.get("citations.openalex", f"doi:{DOI}", 30)["fetched_at"].startswith(
+          _dt.now().strftime("%Y-%m-%d")), True)
+
+# A miss is never cached, for the reason `reusable_records` gives: coverage is
+# the one thing that improves on its own as the sources index more.
+_cache5 = FetchCache(":memory:")
+_missed = citations.citation_record(StubClient(), paper(), cache=_cache5, max_age_days=30)
+check("three sources answering nothing is still a miss",
+      (_missed["citation_count"], _missed["source"]), (None, None))
+check("...and nothing was written to the cache", _cache5.stats()["rows"], 0)
+check("...so the record is dated today, because that is when the miss happened",
+      _missed["fetched_at"].startswith(_dt.now().strftime("%Y-%m-%d")), True)
+
+# Zero is a real count, so it is cached like any other and served like any other.
+_cache6 = FetchCache(":memory:")
+citations.citation_record(StubClient({OPENALEX: ok({"cited_by_count": 0})}),
+                          paper(), cache=_cache6, max_age_days=30)
+_zero_client = StubClient({OPENALEX: ok({"cited_by_count": 500})})
+check("a cached zero is served rather than refetched",
+      citations.citation_record(_zero_client, paper(), cache=_cache6,
+                                max_age_days=30)["citation_count"], 0)
+check("...without a request", _zero_client.calls, [])
+
+# The batch path threads both arguments through, and the payload shape does not
+# move because a cache was handed in.
+_cache7 = FetchCache(":memory:")
+_cache7.put("citations.openalex", "doi:10.1/1", 11, fetched_at=_stamp(4))
+_cache7.put("citations.openalex", "doi:10.1/2", 22, fetched_at=_stamp(4))
+_batch_papers = [{"pmid": "1", "doi": "10.1/1"}, {"pmid": "2", "doi": "10.1/2"},
+                 {"pmid": "3", "doi": "10.1/3"}]
+_batch_client = StubClient({OPENALEX: ok({"cited_by_count": 33})})
+_batch = citations.fetch_citations(_batch_papers, client=_batch_client,
+                                   cache=_cache7, max_age_days=30, max_workers=1)
+check("cached papers cost no requests, the rest are fetched",
+      len(_batch_client.calls), 1)
+check("counts come back per paper, in corpus order",
+      [r["citation_count"] for r in _batch["records"]], [11, 22, 33])
+check("cached records keep their own date",
+      [r["fetched_at"] for r in _batch["records"][:2]], [_stamp(4), _stamp(4)])
+check("the freshly fetched one is dated today",
+      _batch["records"][2]["fetched_at"].startswith(_dt.now().strftime("%Y-%m-%d")), True)
+check("a cache does not change the payload's top-level keys",
+      sorted(_batch), ["denominator", "generated_at", "records", "source_papers_json"])
+check("...nor the denominator", _batch["denominator"],
+      {"papers_total": 3, "papers_with_citations": 3})
+
+# No cache at all is still the default, and behaves exactly as before.
+_nocache = StubClient({OPENALEX: ok({"cited_by_count": 4})})
+check("cache=None fetches everything, as it always did",
+      [r["citation_count"] for r in
+       citations.fetch_citations(_batch_papers, client=_nocache, max_workers=1)["records"]],
+      [4, 4, 4])
+check("...with one request per paper", len(_nocache.calls), 3)
+
+_cache.close()
+_cache2.close()
+_cache3.close()
+_cache4.close()
+_cache5.close()
+_cache6.close()
+_cache7.close()
+
+
 print("\n" + "=" * 70)
 print(f"Summary: {_passed} passed / {_failed} failed / {_passed + _failed} total")
 print("=" * 70)

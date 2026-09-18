@@ -48,6 +48,21 @@ convention produced the figure. All three failing is recorded as
 Standard library only, like the rest of the package: all HTTP goes through
 `RobustHTTPClient`, whose `.get()` returns None on a transport failure and
 returns HTTP error codes as a `Response`.
+
+All three requests identify themselves
+--------------------------------------
+Each `client.get` below passes `http_client.polite_headers()`, so the wire
+carries `check-your-advisor/1.0` instead of the rotating fake-Chrome UA and the
+`Sec-*` / `DNT` headers the download path uses. Those are for the PDF race
+against publisher landing pages; these three are keyless public JSON APIs, and
+`cite` talks to the very same host as `harvest --openalex-works`
+(`api.openalex.org`) — one process reaching one API under two identities would
+be incoherent whichever of the two is the honest one.
+
+`mailto` goes into the User-Agent for OpenAlex only, which is the one of the
+three that documents a polite pool keyed on it. Semantic Scholar and Europe PMC
+document no such thing, so they get the bare project name: an address they never
+asked for is user data sent to a third party for no stated benefit.
 """
 
 from __future__ import annotations
@@ -65,7 +80,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, quote_plus
 
-from .http_client import RobustHTTPClient, Response
+from .http_client import RobustHTTPClient, Response, polite_headers
 
 logger = logging.getLogger("check_your_advisor.citations")
 
@@ -205,7 +220,11 @@ def fetch_openalex(client: RobustHTTPClient, doi: str, mailto: str = "") -> int 
     url = f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}"
     if mailto:
         url += f"?mailto={quote_plus(mailto)}"
-    data = _json_body(client.get(url, accept_type="api", timeout=30), SOURCE_OPENALEX)
+    data = _json_body(
+        client.get(url, accept_type="api", timeout=30,
+                   extra_headers=polite_headers(mailto)),
+        SOURCE_OPENALEX,
+    )
     if data is None:
         return None
     return _coerce_count(data.get("cited_by_count"), SOURCE_OPENALEX)
@@ -224,7 +243,11 @@ def fetch_semantic_scholar(client: RobustHTTPClient, doi: str) -> int | None:
         f"https://api.semanticscholar.org/graph/v1/paper/DOI:{quote(doi, safe='/')}"
         f"?fields=citationCount"
     )
-    data = _json_body(client.get(url, accept_type="api", timeout=30), SOURCE_SEMANTIC_SCHOLAR)
+    data = _json_body(
+        client.get(url, accept_type="api", timeout=30,
+                   extra_headers=polite_headers()),
+        SOURCE_SEMANTIC_SCHOLAR,
+    )
     if data is None:
         return None
     return _coerce_count(data.get("citationCount"), SOURCE_SEMANTIC_SCHOLAR)
@@ -249,7 +272,11 @@ def fetch_europe_pmc(client: RobustHTTPClient, doi: str, pmid: str = "") -> int 
         "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
         f"?query={quote_plus(query)}&format=json&resultType=core&pageSize=1"
     )
-    data = _json_body(client.get(url, accept_type="api", timeout=30), SOURCE_EUROPE_PMC)
+    data = _json_body(
+        client.get(url, accept_type="api", timeout=30,
+                   extra_headers=polite_headers()),
+        SOURCE_EUROPE_PMC,
+    )
     if data is None:
         return None
 
@@ -272,6 +299,77 @@ def fetch_europe_pmc(client: RobustHTTPClient, doi: str, pmid: str = "") -> int 
 # ------------------------------------------------------------------
 
 
+def _now_stamp() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+def _cache_api(source: str) -> str:
+    """The cache namespace for one source.
+
+    Qualified with this module's name because `journal_risk` asks
+    api.openalex.org a different question with a different answer shape, and the
+    two must never be able to read each other's rows.
+    """
+    return f"citations.{source}"
+
+
+def _walk_sources(
+    client: RobustHTTPClient,
+    doi: str,
+    pmid: str,
+    mailto: str,
+    cache: Any | None = None,
+    max_age_days: int = 0,
+) -> tuple[int | None, str | None, str | None]:
+    """`(count, source, fetched_at)` at the first hit, cached or live.
+
+    The third element is what makes a cache honest here: on a cache hit it is
+    the day the count was *originally* read, so `citation_record` dates the row
+    it writes today with last week's date rather than today's. On a live hit it
+    is now. On a total miss it is None, and the caller stamps the miss with now —
+    the miss is a thing that happened today.
+
+    `cache` is a `cache.FetchCache` or None. None, and `max_age_days <= 0`, are
+    both "no cache": the lookup is skipped and every source is asked.
+    """
+    doi = normalise_doi(doi)
+    pmid = str(pmid or "").strip()
+    by_doi = f"doi:{doi}" if doi else ""
+
+    attempts = (
+        (SOURCE_OPENALEX, by_doi,
+         lambda: fetch_openalex(client, doi, mailto)),
+        (SOURCE_SEMANTIC_SCHOLAR, by_doi,
+         lambda: fetch_semantic_scholar(client, doi)),
+        # Keyed the way the request is actually built: Europe PMC is the one
+        # source that can answer from a PMID alone, and does when there is one.
+        (SOURCE_EUROPE_PMC, f"pmid:{pmid}" if pmid else by_doi,
+         lambda: fetch_europe_pmc(client, doi, pmid)),
+    )
+    for name, query, call in attempts:
+        if cache is not None and query:
+            entry = cache.get(_cache_api(name), query, max_age_days)
+            if entry is not None:
+                logger.debug("  ✓ [%s] 缓存命中 %s → %s（采于 %s）",
+                             name, query, entry["value"], entry["fetched_at"])
+                return entry["value"], name, entry["fetched_at"]
+        try:
+            count = call()
+        except Exception as e:  # noqa: BLE001 - one bad payload must not end the batch
+            logger.error("  [%s] 未预期的异常: %s: %s", name, type(e).__name__, e)
+            continue
+        if count is not None:
+            logger.debug("  ✓ [%s] %s → %d", name, doi or pmid or "?", count)
+            # A miss is deliberately never stored, for the reason
+            # `reusable_records` gives: coverage is the one thing that improves
+            # on its own as the sources index more, and a cached miss would
+            # freeze a gap a refetch might close.
+            if cache is not None and query:
+                return count, name, cache.put(_cache_api(name), query, count)
+            return count, name, _now_stamp()
+    return None, None, None
+
+
 def fetch_citation_count(
     client: RobustHTTPClient,
     doi: str = "",
@@ -283,40 +381,36 @@ def fetch_citation_count(
     Returns `(None, None)` when all three miss. A per-source exception is
     logged and the chain continues, so one malformed payload costs one source
     on one paper rather than the whole batch.
-    """
-    doi = normalise_doi(doi)
-    pmid = str(pmid or "").strip()
 
-    attempts = (
-        (SOURCE_OPENALEX, lambda: fetch_openalex(client, doi, mailto)),
-        (SOURCE_SEMANTIC_SCHOLAR, lambda: fetch_semantic_scholar(client, doi)),
-        (SOURCE_EUROPE_PMC, lambda: fetch_europe_pmc(client, doi, pmid)),
-    )
-    for name, call in attempts:
-        try:
-            count = call()
-        except Exception as e:  # noqa: BLE001 - one bad payload must not end the batch
-            logger.error("  [%s] 未预期的异常: %s: %s", name, type(e).__name__, e)
-            continue
-        if count is not None:
-            logger.debug("  ✓ [%s] %s → %d", name, doi or pmid or "?", count)
-            return count, name
-    return None, None
+    No cache seam here on purpose. A count without the day it was taken is the
+    one thing this module refuses to hand out, and this signature has nowhere to
+    put that day — so the cached path is `citation_record`, which does.
+    """
+    count, source, _stamp = _walk_sources(client, doi, pmid, mailto)
+    return count, source
 
 
 def citation_record(
     client: RobustHTTPClient,
     paper: dict[str, Any],
     mailto: str = "",
+    cache: Any | None = None,
+    max_age_days: int = 0,
 ) -> dict[str, Any]:
     """One record in the contract shape, whether or not the lookup succeeded.
 
     `fetched_at` is per record, not per file: a batch of 500 papers takes long
     enough that a single file-level timestamp would misdate most of it.
+
+    `cache` is an optional `cache.FetchCache`. When one is given and
+    `max_age_days > 0`, a source's answer from an earlier run is served without
+    a request — and the record carries **that run's** `fetched_at`, not today's.
+    That is the same promise `reusable_records` makes one layer up, and it is the
+    only way a cache can exist in a package where every number is dated.
     """
     doi = normalise_doi(paper.get("doi"))
     pmid = str(paper.get("pmid") or "").strip()
-    count, source = fetch_citation_count(client, doi=doi, pmid=pmid, mailto=mailto)
+    count, source, stamp = _walk_sources(client, doi, pmid, mailto, cache, max_age_days)
     if count is None:
         logger.debug(
             "  ✗ PMID %s / DOI %s — 三级源均未返回引用数",
@@ -327,7 +421,9 @@ def citation_record(
         "doi": doi,
         "citation_count": count,
         "source": source,
-        "fetched_at": datetime.now().isoformat(timespec="seconds"),
+        # A miss has no collected day but today: nothing was collected, and the
+        # nothing was observed now.
+        "fetched_at": stamp or _now_stamp(),
     }
 
 
@@ -402,6 +498,8 @@ def fetch_citations(
     mailto: str = "",
     max_workers: int = 4,
     reuse: Mapping[str, dict[str, Any]] | None = None,
+    cache: Any | None = None,
+    max_age_days: int = 0,
 ) -> dict[str, Any]:
     """Fetch a count for every paper and return the full on-disk payload.
 
@@ -418,6 +516,14 @@ def fetch_citations(
     `reusable_records`. Carried records are emitted verbatim, keeping their own
     `fetched_at`, so the payload's shape is unchanged and the age of every count
     stays readable per row. Papers absent from it are fetched normally.
+
+    `cache` and `max_age_days` are the second, finer version of the same saving,
+    and they compose with `reuse` rather than replacing it: `reuse` skips a whole
+    record that the last *output file* already holds, the cache skips a single
+    *source request* that any earlier run already made — including for a paper
+    whose record never reached a file because the run died. Both keep the
+    original `fetched_at`; neither ever restamps a carried number with today.
+    `max_age_days <= 0` switches the cache off, which is the default.
     """
     papers = list(papers)
     total = len(papers)
@@ -440,7 +546,8 @@ def fetch_citations(
         carried = reuse.get(str(paper.get("pmid") or "").strip())
         if carried is not None:
             return dict(carried)
-        record = citation_record(client, paper, mailto=mailto)
+        record = citation_record(client, paper, mailto=mailto,
+                                 cache=cache, max_age_days=max_age_days)
         with lock:
             done += 1
             if done % _PROGRESS_EVERY == 0 or done == to_fetch:
