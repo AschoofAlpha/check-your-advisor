@@ -457,8 +457,18 @@ check_true("...and are not filed as a refusal",
            "impact factor" not in refused)
 check_true("rank, percentile and star rating sit under `refused_by_design`",
            all(word in refused for word in ("rank", "percentile", "star rating", "tier")))
-check_true("...and so do fitted trends, unchanged from the original register",
+# Round four: the entry is still here and its original objection is quoted
+# verbatim inside it, but the heading is narrower than it was. Section 9 prints a
+# fitted slope now; what this register refuses is a slope reaching the *score*.
+# The old label on this assertion said "unchanged from the original register",
+# which stopped being true the moment the heading was scoped — the strings below
+# would have kept passing and said so anyway.
+check_true("...and so do fitted trends, as inputs to the score",
            "fitted slopes" in refused and "year-over-year" in refused)
+check_true("...with the scope stated rather than implied",
+           "as inputs to the score" in refused)
+check_true("...and round one's objection kept word for word inside it",
+           "do not support a slope" in refused)
 check_true("the refusal is stated as surviving a better data source",
            "refused" in refused)
 

@@ -74,12 +74,18 @@ from .report import STRATUM_LABEL, json_record
 # CAV-09 is first registered at Section 5 but is needed under the Section 2
 # timeline, because that figure is where a reader forms the tenure belief
 # CAV-09 exists to deny.
+#
+# C-POS and C-NET carry no caveat ids. Section 7's qualifications are conditional
+# on `measured` and Section 19's are prose rather than register entries, so
+# pinning one to a figure would print a wording its own section does not.
 FIGURE_PLACEMENT: tuple[tuple[str, int, tuple[str, ...]], ...] = (
     ("C-GANTT", 2, ("CAV-02", "CAV-03", "CAV-09")),
     ("C-LAG", 4, ("CAV-06", "CAV-07", "CAV-08")),
     ("C-SPAN", 5, ("CAV-09", "CAV-10", "CAV-11")),
+    ("C-POS", 7, ()),
     ("C-YEAR", 9, ("CAV-17", "CAV-18")),
     ("C-TEAM", 10, ("CAV-19",)),
+    ("C-NET", 19, ()),
 )
 
 # Sections whose body is never put behind a disclosure, whatever its length.
@@ -99,7 +105,13 @@ FIGURE_PLACEMENT: tuple[tuple[str, int, tuple[str, ...]], ...] = (
 # prints partitions whose meaning depends entirely on the edition and the
 # retrieval date sitting beside them, so the number and its provenance are never
 # separated by a disclosure.
-ALWAYS_OPEN_SECTIONS = frozenset({0, 14, 15, 16, 17, 18})
+#
+# 20 is here for a reason of its own. Its per-source table is the only thing on
+# the page tying each collected statement to a site and a day, and its row count
+# is exactly the shape that trips COLLAPSE_TABLE_ROWS below — a reader who
+# expands the statements while the sources stay folded away is reading anonymous
+# claims about a named person. The two never separate.
+ALWAYS_OPEN_SECTIONS = frozenset({0, 14, 15, 16, 17, 18, 20})
 
 # Section 13 is every title in the corpus, verbatim. It is a reading exercise,
 # not a scanning one, and it is the longest block on the page.
@@ -463,6 +475,16 @@ def _render_section(
         f'<h2 id="s{section_id}-h">{section_id}. {_esc(section["title"])}</h2>',
     ]
 
+    # Identity warnings first, above the prose and outside every disclosure.
+    # Each one stands where a refusal page used to stand, so it gets a callout
+    # of its own rather than another blockquote: a reader who has learned to
+    # skim caveat blocks would skim this too, and this is the one line that says
+    # the section may not be about the person named at the top of the page.
+    for text in section.get("warnings") or []:
+        parts.append(
+            f'<div class="warnbox" role="note"><p>{_inline(text)}</p></div>'
+        )
+
     # Prose is never collapsed. It is the section's own statement of what it can
     # and cannot say, which is exactly the part that must not need a click.
     for block in _parse_blocks(section.get("prose") or []):
@@ -598,7 +620,13 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
         "quantile position and no letter grade anywhere on the page. Section 17 counts graduates "
         "who published nothing at all, which is the one population every other section is blind "
         "to. Section 18 carries journal-level numbers only when you supplied the table yourself, "
-        "with the edition and the retrieval date printed beside every one.</p>",
+        "with the edition and the retrieval date printed beside every one, and beneath them the "
+        "public risk signals three open APIs returned about those journals on a stated day — "
+        "statements with their source attached, never a rating: nothing on this page calls any "
+        "journal predatory and no count of those signals becomes a grade. Section 20 reproduces "
+        "student evaluations you collected by hand, each beside its source and the day it was "
+        "read; they are printed as given and nothing is computed over them — no sentiment "
+        "analysis, no average, no rating, and no contribution to any score on this page.</p>",
         "</header>",
     ]
 
@@ -677,6 +705,9 @@ blockquote.caveat{margin:.7rem 0;padding:.55rem .8rem;border-left:5px solid var(
 blockquote.caveat p{margin:0}
 .caveat-id{font-weight:700;font-size:.72rem;letter-spacing:.05em;margin-right:.45rem;
  text-transform:uppercase}
+.warnbox{margin:.2rem 0 1rem;padding:.7rem .9rem;border:3px solid var(--ink);
+ background:var(--soft);max-width:78ch}
+.warnbox p{margin:0;font-size:.95rem}
 figure{margin:1rem 0;max-width:1100px}
 .figscroll{overflow-x:auto;border:1px solid var(--rule);padding:.3rem;background:var(--bg)}
 .figure-note{border:1px solid var(--rule);padding:.6rem;background:var(--soft);max-width:78ch}
@@ -703,7 +734,7 @@ a{color:var(--accent)}
  .roster-controls{display:none}
  details:not([open])>*:not(summary){display:revert}
  tr.is-filtered-out{display:table-row}
- figure,blockquote.caveat,tr{break-inside:avoid}
+ figure,blockquote.caveat,.warnbox,tr{break-inside:avoid}
  h2{break-after:avoid}
  thead{display:table-header-group}
  #fig-c-gantt{break-before:page}

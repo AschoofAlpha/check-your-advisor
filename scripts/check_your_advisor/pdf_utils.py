@@ -106,8 +106,11 @@ def pdf_text_extraction_available() -> bool:
     Whether PyMuPDF can be imported, i.e. whether identity validation can run.
 
     Callers should check this once at startup and warn, rather than discovering
-    per-download that validation is silently degrading to a no-op. PyMuPDF is a
-    declared dependency, so this returning False means a broken install.
+    per-download that validation is silently degrading to a no-op. PyMuPDF is
+    the `pdf` optional extra and not a dependency — it is AGPL-3.0 and this
+    package is MIT — so False is the normal state of a default install, not a
+    broken one. Without it every download is still checked for the `%PDF-`
+    magic; what is lost is quarantining a file by its content.
     """
     try:
         import fitz  # noqa: F401

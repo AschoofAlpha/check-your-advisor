@@ -109,6 +109,104 @@ check("...including one turned on in the config file",
       identity(["--author", "X"], base)["require_affiliation"], True)
 
 
+print("\nThe OpenAlex switches, and where each of them lands")
+# `--openalex-author-id` is identity — it says who this is. The other two are
+# fetch instructions and live in their own config block, so a config file that
+# turns the lookup on does not thereby claim an identity.
+from check_your_advisor.cli import apply_cli_overrides as _apply  # noqa: E402
+
+
+def cfg_of(argv: list[str], base: dict | None = None) -> dict:
+    return _apply(base if base is not None else copy.deepcopy(DEFAULT_CONFIG),
+                  parse_fetch_args(argv))
+
+
+check("--openalex-author-id lands in the identity block",
+      identity(["--author", "X", "--openalex-author-id", "A5023888391"])["openalex_author_id"],
+      "A5023888391")
+# The id alone is not evidence about a PubMed harvest: `parse_article` never
+# writes `openalex_author_id` onto a byline entry, so every record would come
+# back `name_only` no matter what id was configured. It counts once
+# `--openalex-works` is on, because then OpenAlex contributes records that do
+# carry it.
+check("...but on its own it is not evidence — no PubMed record can carry it",
+      _has_identity_evidence(
+          identity(["--author", "X", "--openalex-author-id", "A5023888391"])), False)
+check("...and counts once --openalex-works will merge records that do carry it",
+      _has_identity_evidence(
+          identity(["--author", "X", "--openalex-author-id", "A5023888391"]),
+          merge_works=True), True)
+check("...while --openalex-works with no id stays evidence-free",
+      _has_identity_evidence(identity(["--author", "X"]), merge_works=True), False)
+check("no flag leaves it empty",
+      identity(["--author", "X"])["openalex_author_id"], "")
+check("...and an empty one is not evidence",
+      _has_identity_evidence(identity(["--author", "X"])), False)
+check("--resolve-openalex lands in the openalex block, not in identity",
+      cfg_of(["--author", "X", "--resolve-openalex"])["openalex"]["resolve_author"], True)
+check("...and asserts no identity by itself",
+      _has_identity_evidence(
+          cfg_of(["--author", "X", "--resolve-openalex"])["author_identity"]), False)
+check("--openalex-works lands beside it",
+      cfg_of(["--author", "X", "--openalex-works"])["openalex"]["merge_works"], True)
+check("--max-works overrides the budget",
+      cfg_of(["--author", "X", "--max-works", "50"])["openalex"]["max_works"], 50)
+check("both switches default off, because an extra API call is a choice",
+      (cfg_of(["--author", "X"])["openalex"]["resolve_author"],
+       cfg_of(["--author", "X"])["openalex"]["merge_works"]), (False, False))
+
+# A value set in the config file survives a run that does not repeat the flag,
+# on the same rule every other identity field follows.
+_base = copy.deepcopy(DEFAULT_CONFIG)
+_base["openalex"]["merge_works"] = True
+_base["author_identity"]["openalex_author_id"] = "A777"
+check("a configured author id is not wiped by omitting the flag",
+      identity(["--author", "X"], _base)["openalex_author_id"], "A777")
+_base2 = copy.deepcopy(DEFAULT_CONFIG)
+_base2["openalex"]["merge_works"] = True
+check("...nor is a configured merge switch",
+      cfg_of(["--author", "X"], _base2)["openalex"]["merge_works"], True)
+
+
+print("\nAn explicit id short-circuits the lookup; an unresolved one refuses to guess")
+import logging  # noqa: E402
+
+logging.getLogger("check_your_advisor").setLevel(logging.CRITICAL)
+from check_your_advisor.cli import (  # noqa: E402
+    _openalex_corpus,
+    _resolve_openalex_identity,
+)
+
+_explicit_identity = {"openalex_author_id": "https://openalex.org/A5023888391"}
+_record = _resolve_openalex_identity(
+    {"openalex": {"resolve_author": True}, "author_name": "X"}, _explicit_identity, logging.getLogger("t")
+)
+check("an explicit id is taken as given", _record["resolution"], "explicit")
+check("...normalised out of its URL form", _record["openalex_author_id"], "A5023888391")
+check("...and attributed to the user, not to OpenAlex", _record["source"], "user")
+check("...with no candidate list, because no question was asked",
+      _record["candidates"], [])
+
+check("no id and no --resolve-openalex means no OpenAlex block at all",
+      _resolve_openalex_identity({"openalex": {}, "author_name": "X"}, {},
+                                 logging.getLogger("t")), {})
+
+# The merge cannot run without a settled id, and it says so rather than
+# guessing at one — this is the ambiguous-candidates path arriving downstream.
+_papers = [{"pmid": "1", "title": "t"}]
+_merged, _prov = _openalex_corpus(
+    {"openalex": {"merge_works": True}}, {"openalex_author_id": ""}, _papers,
+    logging.getLogger("t"),
+)
+check("an unresolved id leaves the corpus untouched", _merged, _papers)
+check("...and records that the merge was asked for and did not happen",
+      (_prov["merge_requested"], _prov["merged"]), (True, False))
+check("...with the reason", _prov["reason"], "no resolved openalex_author_id")
+check("not asking for the merge records nothing",
+      _openalex_corpus({"openalex": {}}, {"openalex_author_id": "A1"}, _papers,
+                       logging.getLogger("t"))[1], {})
+
+
 print("\nThe corpus carries the evidence it was built with")
 # The identity gate has to be decided from what produced the corpus, not from
 # whatever config is loaded when the report runs. Deciding it from the latter is
@@ -148,6 +246,36 @@ empty_recorded = _profile_corpus(PAPERS, {"author_identity": RECORDED},
                                  {"identity": {}})["identity"]
 check("an empty recorded block is a record, not an absence",
       _has_identity_evidence(empty_recorded), False)
+
+# The OpenAlex id follows the same rule as the other three, and is normalised on
+# the way in so the URL spelling recorded at harvest time still matches the bare
+# spelling `roles.evidence_tier` compares against.
+oa_corpus = _profile_corpus(
+    PAPERS, {"author_identity": {}},
+    {"identity": {**empty_run, "openalex_author_id": "https://openalex.org/A5023888391"}},
+)
+check("a recorded OpenAlex id is normalised into the corpus",
+      oa_corpus["identity"]["openalex_author_id"], "A5023888391")
+check("...and is still not evidence on its own, only under --openalex-works",
+      _has_identity_evidence(oa_corpus["identity"]), False)
+check("...which is what makes it count",
+      _has_identity_evidence(oa_corpus["identity"], merge_works=True), True)
+
+# The two OpenAlex provenance blocks travel with the corpus so the report can
+# print who asserted the identity and when, rather than just the id.
+prov_corpus = _profile_corpus(
+    PAPERS, {"author_identity": {}},
+    {"identity": empty_run, "esearch_term": "x",
+     "openalex": {"resolution": "ambiguous", "candidates": [{"openalex_author_id": "A1"}]},
+     "openalex_works": {"merged": True, "works_returned": 12}},
+)
+check("the resolution block reaches the report's query block",
+      prov_corpus["query"]["openalex"]["resolution"], "ambiguous")
+check("...and so does the works block",
+      prov_corpus["query"]["openalex_works"]["works_returned"], 12)
+check("a PubMed-only harvest carries neither",
+      [k for k in ("openalex", "openalex_works")
+       if k in _profile_corpus(PAPERS, {}, {"esearch_term": "x"})["query"]], [])
 
 
 print("\n" + "=" * 70)

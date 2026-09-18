@@ -9,10 +9,28 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# 「来源」是合并语料才有意义的一列：一条记录来自哪个书目库、被哪几个库确认过。
+# 单源检索里它恒为 pubmed，这不是冗余——一份表格里看不出自己是单源还是合并，
+# 而两者的分母不是同一个数。papers_*.json 里同名字段是权威值，这里只是让打开
+# 表格的人也能看见。
 HEADERS = [
-    "序号", "PMID", "标题", "作者", "角色", "期刊", "发表日期",
+    "序号", "PMID", "标题", "作者", "角色", "来源", "期刊", "发表日期",
     "卷", "期", "页码", "DOI", "PMC ID", "PDF状态", "摘要",
 ]
+
+
+def _sources(paper: dict) -> str:
+    """`pubmed`、`openalex`，或两者都确认时 `pubmed+openalex`。
+
+    读 `confirmed_by`（每个持有这条记录的源）而不是 `source`（这条记录的元数据
+    来自谁），因为「两个书目库都收了这篇」比「元数据取自谁」更值得占一列。
+    两者都缺的是合并功能出现之前建的语料，留空而不是补 `pubmed`——那会把
+    「没记」写成一个确定值。
+    """
+    confirmed = paper.get("confirmed_by")
+    if isinstance(confirmed, (list, tuple)) and confirmed:
+        return "+".join(str(name) for name in confirmed)
+    return str(paper.get("source") or "")
 
 
 def _paper_row(idx: int, paper: dict) -> list:
@@ -22,6 +40,7 @@ def _paper_row(idx: int, paper: dict) -> list:
         paper.get("title", ""),
         paper.get("authors_str", ""),
         paper.get("role", ""),
+        _sources(paper),
         paper.get("journal", ""),
         paper.get("pub_date", ""),
         paper.get("volume", ""),
@@ -63,9 +82,9 @@ def save_to_excel(papers: Iterable[dict], filepath: str) -> None:
         for col, value in enumerate(_paper_row(idx, paper), 1):
             cell = ws.cell(row=idx + 1, column=col, value=value)
             cell.border = thin_border
-            cell.alignment = Alignment(vertical="top", wrap_text=(col in [3, 4, 14]))
+            cell.alignment = Alignment(vertical="top", wrap_text=(col in [3, 4, 15]))
 
-    widths = [6, 12, 50, 35, 18, 30, 14, 6, 6, 10, 30, 14, 18, 60]
+    widths = [6, 12, 50, 35, 18, 16, 30, 14, 6, 6, 10, 30, 14, 18, 60]
     for col, width in enumerate(widths, 1):
         ws.column_dimensions[ws.cell(row=1, column=col).column_letter].width = width
 

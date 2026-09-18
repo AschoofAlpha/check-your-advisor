@@ -3,9 +3,14 @@ HTTP 客户端模块
 ===============
 封装所有 HTTP 请求逻辑，统一处理：
 - 指数退避重试（解决原代码 15 处 except Exception: pass）
-- UA 池轮换 + 请求指纹随机化（反爬）
+- UA 池轮换 + 请求指纹随机化（反爬）—— **只给 PDF 下载那条路用**
+- 诚实 UA（`polite_headers`）—— 给 keyless 公共 API 用，两者不共用一套头
 - 可选代理 IP 池
 - 统一超时与错误日志
+
+两套请求头是有意的，见下面 `polite_headers` 的注释：出版商落地页和
+OpenAlex/Crossref/DOAJ 的公开 JSON 接口不是同一种对手，把伪装的浏览器指纹发给
+后者，与本包对外「不写爬虫、走的是有文档的 API」这句话直接冲突。
 
 Standard library only. This used to be `requests` + `urllib3.Retry`, which was
 the last hard third-party dependency in the package and therefore the reason a
@@ -60,6 +65,49 @@ ACCEPT_PROFILES = {
 }
 
 RETRY_STATUSES = frozenset({429, 500, 502, 503, 504})
+
+# ============================================================
+# 诚实 UA：给 keyless 公共 API 用，**不走上面的 UA 池**
+# ============================================================
+# The pool above exists for the PDF download race, where the other end is a
+# publisher landing page that does not want to be read by a program. A keyless
+# public JSON API is the opposite situation: OpenAlex and Crossref both document
+# a "polite pool" that *requires* the caller to say who it is, and both route
+# identified requests onto faster, more reliable infrastructure. Sending a
+# rotating fake Chrome UA to those endpoints is not politeness-neutral — it is
+# the exact behaviour their documentation asks callers not to exhibit, and it
+# contradicts this package's own statement (journals.py) that its API calls are
+# documented API calls rather than scraping.
+#
+# So API callers pass `polite_headers()` through the `extra_headers` hook on
+# `get()`. Same string as `pubmed_api.USER_AGENT`, deliberately duplicated
+# rather than imported: `pubmed_api` talks to NCBI through bare `urlopen` and
+# does not depend on this module, and a low-level transport importing a
+# high-level API client to borrow a constant would be the wrong direction.
+PROJECT_USER_AGENT = "check-your-advisor/1.0"
+
+# Headers that only a browser sends. When a caller identifies itself by name,
+# these are stripped rather than left attached — `User-Agent: check-your-advisor
+# /1.0` beside `Sec-Ch-Ua-Platform: "Windows"` is not an honest request, it is
+# an incoherent one.
+_BROWSER_ONLY_HEADERS = ("sec-", "dnt")
+
+
+def polite_headers(mailto: str = "") -> dict:
+    """Honest identification for a keyless public API, per its own docs.
+
+    `mailto` is not authentication and not a key. Crossref documents
+    `User-Agent: <app>/<version> (mailto:<address>)` as the way into its polite
+    pool, and OpenAlex accepts the same address either in the UA or as a query
+    parameter. It is included only when the user supplied one via `--email`; the
+    default sends the project name alone.
+
+    `Accept-Language` is pinned rather than randomised for the same reason the
+    UA is: varying it per request is fingerprint randomisation, which is what
+    this function exists to not do.
+    """
+    ua = f"{PROJECT_USER_AGENT} (mailto:{mailto})" if mailto else PROJECT_USER_AGENT
+    return {"User-Agent": ua, "Accept-Language": "en"}
 
 
 def _random_headers(accept_type: str = "pdf") -> dict:
@@ -191,9 +239,10 @@ class _NoRedirect(HTTPRedirectHandler):
 
 class RobustHTTPClient:
     """
-    带重试、日志、反爬的 HTTP 客户端。
+    带重试、日志的 HTTP 客户端；反爬那套只在调用方不自报身份时生效。
 
-    替代原代码中散落的 requests.get(...) 调用，统一行为。
+    替代原代码中散落的 requests.get(...) 调用，统一行为。默认走 UA 池（PDF
+    下载），调用方传 `extra_headers=polite_headers()` 就改走诚实 UA（公开 API）。
     """
 
     def __init__(
@@ -245,10 +294,23 @@ class RobustHTTPClient:
         返回 None 表示网络层失败（超时、连不上）；HTTP 错误状态码会作为
         Response 返回而不是抛出，与原先 requests 的行为一致——调用方一律读
         `resp.status_code`，把 404 变成异常会改变每一个调用点的语义。
+
+        `extra_headers` 里带 `User-Agent` 时，本次请求被当作「调用方自报身份」
+        处理：随机 UA 被覆盖，浏览器专有的 Sec-* / DNT 一并去掉。
+
+        谁传、谁不传，是按端点分的，不是按模块分的：`citations` / `openalex` /
+        `journal_risk` 的每一处，以及 `download_sources` 里 6 处
+        `accept_type="api"` 的目录查询，都传 `polite_headers()`；同一批源函数里
+        取落地页和 PDF 二进制的那些请求不传，照旧走 UA 池。不传 `extra_headers`
+        时行为与本参数存在之前完全一致。
         """
         headers = _random_headers(accept_type)
         if extra_headers:
             headers.update(extra_headers)
+            if any(key.lower() == "user-agent" for key in extra_headers):
+                for key in list(headers):
+                    if key.lower().startswith(_BROWSER_ONLY_HEADERS):
+                        del headers[key]
 
         effective_timeout = timeout or self.timeout
         proxy = self._get_proxy()

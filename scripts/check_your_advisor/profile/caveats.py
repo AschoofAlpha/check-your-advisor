@@ -233,6 +233,26 @@ CAVEATS: dict[str, str] = {
         "listed for a human and left out of both buckets, which is why the result is reported as "
         "a floor and a ceiling instead of one number."
     ),
+    # The one entry in this block that is not about a hand-filled file. It sits
+    # here anyway, and not with CAV-00..22, because those are about what PubMed
+    # records and this is about a third party's statement concerning a journal —
+    # the same distinction the block boundary above was drawn for. The long
+    # version is `journal_risk.JOURNAL_RISK_CAVEATS`, printed inside Section 18.
+    "CAV-33": (
+        "Some journal-level lines in this report were fetched rather than typed: DOAJ indexing "
+        "status, Crossref metadata deposit coverage and OpenAlex's source record, each read on a "
+        "stated day and printed with the endpoint that returned it. They are statements, not a "
+        "rating. Nothing in this report calls any journal predatory, no count of these signals is "
+        "turned into a grade, a tier, a score, a letter or a colour, and none of them contributes "
+        "to the composite score. Two of them are routinely misread and are worth stating in "
+        "reverse: absence from DOAJ is not a finding, because DOAJ indexes open-access journals "
+        "that applied to it and every subscription journal is absent by construction; a Crossref "
+        "coverage field reading zero is not a finding either, because it measures what a publisher "
+        "deposits and ordinary journals sit at zero on several of them. The 中科院国际期刊预警名单 "
+        "is not among these and cannot be — it is published once a year behind a login with no "
+        "machine-readable endpoint, so it stays in the hand-filled 是否预警 column, and a blank "
+        "cell there means nobody checked rather than that a journal is absent from the list."
+    ),
 }
 
 
@@ -342,6 +362,23 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "remains a missing input rather than a judgement about the venues.",
     ),
     (
+        "A predatory-journal verdict — refused, and the signals behind one printed instead",
+        "This is a refusal and not a missing input, so it does not move if better data arrives. "
+        "\"Predatory\" is an accusation about a publisher's conduct; it is not a measurement, no "
+        "open source makes it, and a tool whose whole credibility rests on not printing an "
+        "inference as a fact has no business manufacturing one. So there is no risk grade here, no "
+        "tier, no score, no letter and no colour, at any number of signals, and nothing collected "
+        "reaches the composite score. What is printed instead is the evidence a reader would want "
+        "before forming their own view: `check-your-advisor journal-risk` reads DOAJ indexing "
+        "status, Crossref metadata deposit coverage and OpenAlex's source record — three open "
+        "keyless APIs, all three queried every time, no first-hit-wins and no winner where they "
+        "disagree — and Section 18 prints each statement beside the endpoint that returned it and "
+        "the day it was read. The two signals most likely to be misread are stated in reverse "
+        "there: absence from DOAJ is not a finding, and a Crossref coverage field at zero is not "
+        "one either. The 中科院国际期刊预警名单 stays a hand-filled column for a different reason "
+        "again — it has no machine-readable endpoint at all, and this package will not scrape one.",
+    ),
+    (
         "Rank, star band, \"scored higher than\" — no longer dropped",
         "This line is kept so the second reversal is visible instead of silent. Round one printed "
         "a score and refused every ordering built on it, on the rule \"a value may be printed, a "
@@ -359,6 +396,60 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "under the same weights. What did not come back with any of it is the ordering of "
         "*people*: no roster in this report is sorted by a count, and the rank column ranks "
         "corpora, which are files.",
+    ),
+    (
+        "Refusing the whole report over an unverifiable identity — no longer done",
+        "This line is kept so the third reversal is visible instead of silent. Gates G2 (no paper "
+        "passed identity verification) and G3 (no identity evidence reached the corpus) used to "
+        "produce a page carrying the gate, the observed values and the fix, and nothing else. They "
+        "are now warnings printed in bold at the top of Sections 0, 1 and 19, the report is built "
+        "in full, and the process exit code is still 1 so anything scripted against the refusal "
+        "behaves as it did. The reason for the change is Section 19: it is the check for exactly "
+        "the failure those gates fire on — it removes the PI and asks whether the remaining "
+        "records are still tied together by shared co-authors — and refusing meant a reader who "
+        "needed it most never saw it. Sixteen sections of computed fact were being destroyed to "
+        "prevent one unwarranted claim, and the claim is prevented by the warning instead. What "
+        "did not change: the corpus is not certified by rendering, it takes no position on the "
+        "comparison page (`ranking` leaves it unranked and names the warning as the reason), and "
+        "the numbers are not softened or suppressed anywhere to accommodate it. G4 (no structured "
+        "author records) and G5 (nothing left after exclusions) are still gates, because there is "
+        "no degraded report to print when there is nothing to compute over.",
+    ),
+    (
+        "Warning G3 read off the config — now read off what the evidence reached",
+        "This line is kept so a reversed judgement is visible instead of silent. G3 used to ask "
+        "whether an orcid, an email_domains entry or an affiliation_keywords entry was *set*. A "
+        "corpus that set one and matched it against not a single record therefore cleared the "
+        "warning and exited 0, while an identical corpus with the field left blank warned and "
+        "exited 1 — the same evidence, none, judged two ways on the strength of a string in a "
+        "config file. It now counts how many records each key actually reached, through the same "
+        "matchers `resolve_pi` uses for the byline keys and the same record-level reader "
+        "`openalex_id_record_share` uses for the id. So a configured key that matched nothing now "
+        "warns and exits 1 where it used to be silent: that is more corpora warning, on purpose, "
+        "and it is the point of the change. The min_openalex_record_share boundary is untouched — "
+        "the OpenAlex id was already judged this way, and the other three have caught up with it. "
+        "The banner text moved with the rule and now names which of the three situations fired, "
+        "because one sentence covering all three read \"No identity evidence reached a single "
+        "record\" over corpora whose Observed values on the same line read "
+        "`openalex_id_on_records=2/6`.",
+    ),
+    (
+        "A pi-name over a corpus file that carries no search block — was discarded, now wins",
+        "This line is kept so a reversed precedence is visible instead of silent. Two places "
+        "supply the name a report is read against: `--pi-name` on the command line and whatever "
+        "name the harvest that wrote the corpus file was run under. The rule has always been that "
+        "the command line wins and the recorded name fills the gap, and `cli._profile_corpus` "
+        "applied it — but only to a file carrying a `search` key. A file already in the Section 4 "
+        "corpus shape goes to `build_report` untouched, and `build_report` had the two the other "
+        "way round, so on that one path `--pi-name` was parsed, logged and then dropped. The name "
+        "warning (G7) then measured the name in the file, found it on every byline, and the run "
+        "exited 0 with nothing on the page about the name that had been typed. It now measures "
+        "the typed name on both paths. So a corpus profiled under a name nobody on it holds warns "
+        "and exits 1 where it used to be silent: that is more corpora warning, on purpose, and it "
+        "is the point of the change. What did not change is the other half of the rule — with no "
+        "name on the command line and none in the config, the name the file records is still what "
+        "the report is about, which is what lets `compare` read several corpora about different "
+        "people without a name per directory.",
     ),
     (
         "Percentile, quantile position, letter grade",
@@ -391,8 +482,15 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "Require knowing contribution, which is in no field at any level.",
     ),
     (
-        "Trends, fitted slopes, year-over-year percentage change",
-        "Five right-censored integer points do not support a slope. 3 papers to 5 is not \"+67%\".",
+        "Year-over-year percentage change — still dropped. Fitted slopes — no longer dropped",
+        "Kept on one line so the fourth reversal is visible rather than silent. The original "
+        "objection stands unaltered: five right-censored integer points do not support a slope, "
+        "and 3 papers to 5 is not \"+67%\". Year-over-year change is still refused outright for "
+        "exactly that second reason — it turns two small counts into a number that looks like a "
+        "rate. What changed is the slope, and only in how it is presented: Section 9 prints one "
+        "with the interval around it and the count of points it was fitted over in the same "
+        "sentence, and `profile/trends.py` refuses to fit at all below four points. The reader is "
+        "shown the width instead of being asked to trust the middle.",
     ),
     (
         "Any distinction between PhD student, master's student, postdoc, staff scientist, technician, "
@@ -422,5 +520,19 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "failure than the one it would prevent. What separates one person from several is whether the "
         "clusters' subject matter is related, which needs the subject classification dropped at the "
         "top of this register. So Section 19 prints the partition and hands the reading over.",
+    ),
+    (
+        "A sentiment score or overall rating from the evaluations in Section 20",
+        "Refused by decision, not by difficulty — a polarity label over a handful of posts is four "
+        "lines of code. Section 20 holds statements collected by hand from public pages, and "
+        "everyone in it chose to write something: people post after an experience strong enough to "
+        "be worth typing up, in either direction, and there is no observable denominator of the "
+        "people who felt neither way. An average over that measures who bothered to post. It would "
+        "also carry the authority of a measurement and the content of a guess, and it would be "
+        "quoted long after the text it came from was forgotten. So no row of that table is "
+        "labelled positive or negative, none is averaged, none is rated, and none enters the "
+        "composite score in Section 16 at any weight, including zero. The statements are printed "
+        "as given, beside the source they came from and the day it was read, and the reading is "
+        "the reader's.",
     ),
 )

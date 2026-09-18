@@ -4,10 +4,10 @@
 Journal-level metrics for a harvested corpus — the table's schema, a loader, a
 join, and the worklist that says which journals to go and look up.
 
-**This module makes no network request, and there is no crawler here or
-anywhere else in the package.** Impact factor, JCR quartile and CAS partition
-live in subscription databases that forbid scraping and defend against it. So
-the tool does four things and no more:
+**This module makes no network request, and a test asserts its source contains
+none.** Impact factor, JCR quartile and CAS partition live in subscription
+databases that forbid scraping and defend against it. So the tool does four
+things and no more:
 
   1. define the table's schema             (`SCHEMA`, `REQUIRED_FIELDS`)
   2. emit a worklist of what to look up    (`journal_worklist`, `write_worklist_csv`)
@@ -17,6 +17,15 @@ the tool does four things and no more:
 The data is fetched by hand, by the user, from LetPub or ablesci or a JCR seat.
 That is slower than a scraper and it is the only version of this that is both
 legal and accurate.
+
+There is no crawler anywhere in this package, and the boundary is worth stating
+precisely because a sibling module now does make requests about journals.
+`journal_risk.py` reads DOAJ, Crossref and OpenAlex — keyless public JSON APIs
+whose terms permit exactly this — and writes its own dated file. That is a
+documented API call, not a scrape of a vendor page, and it produces statements
+with an endpoint and a date rather than a rating. Nothing it collects is ever
+written back into the table this module loads: a value the user typed and a
+value an API returned last Tuesday must stay distinguishable in the report.
 
 Scope is set by the corpus, not by the vendor
 ---------------------------------------------
@@ -208,6 +217,21 @@ SCHEMA: tuple[Column, ...] = (
            aliases=("语料篇数", "出现篇数", "papercount", "corpuspapercount")),
     Column("alias_group", "疑似同刊组", "alias_group",
            aliases=("同刊组", "aliasgroup", "别名组")),
+    # Also written by the worklist template, and unlike every column above them
+    # these two are not looked up by hand: `journal-risk` collects them from
+    # three open APIs and `journal-worklist --risk-json` copies them in so the
+    # person filling the rest of the row can see which journals to look at
+    # harder. They are advisory and nothing joins on them.
+    #
+    # 风险信号采集日期 is not optional decoration. These two columns carry
+    # fetched values into a file the user then edits and re-saves, which is
+    # exactly how a dated measurement turns into an undated assertion; the date
+    # beside them is the only thing that stops it. Same argument 数据获取日期
+    # makes for the partition columns.
+    Column("risk_signals", "风险信号", "risk_signals",
+           aliases=("公开风险信号", "risksignals", "signals", "风险标记")),
+    Column("risk_checked_on", "风险信号采集日期", "risk_checked_on",
+           aliases=("风险采集日期", "信号采集日期", "riskcheckedon", "riskretrievedon")),
 )
 
 REQUIRED_FIELDS: tuple[str, ...] = tuple(c.key for c in SCHEMA if c.required)
@@ -523,6 +547,12 @@ def _parse_row(cells: Sequence[str], mapping: Mapping[int, str], row_number: int
         "is_warning": _parse_bool(values["is_warning"]),
         "warning_level": values["warning_level"],
         "notes": values["notes"],
+        # Carried through verbatim, and listed here explicitly because this dict
+        # is hand-written: a key in SCHEMA but not in this return value is loaded
+        # and then silently dropped, which is how `corpus_paper_count` and
+        # `alias_group` came to be documented as carried while not being.
+        "risk_signals": values["risk_signals"],
+        "risk_checked_on": values["risk_checked_on"],
     }
 
 
@@ -842,7 +872,11 @@ def _alias_groups(names: Sequence[str]) -> dict[str, int]:
     return {name: assigned.get(name, 0) for name in names}
 
 
-def write_worklist_csv(worklist: Mapping[str, Any], path: str) -> str:
+def write_worklist_csv(
+    worklist: Mapping[str, Any],
+    path: str,
+    risk_cells: Mapping[str, Mapping[str, str]] | None = None,
+) -> str:
     """Write the worklist as the table's own template; return the path.
 
     The header is the full schema, so what comes back after the metric columns
@@ -850,6 +884,13 @@ def write_worklist_csv(worklist: Mapping[str, Any], path: str) -> str:
     Known cells — journal name, ISSN when the corpus had one, the corpus paper
     count, the alias group — are pre-filled; everything the user has to look up
     is blank.
+
+    `risk_cells` maps a journal name to `{"risk_signals", "risk_checked_on"}`,
+    which `journal_risk.worklist_cells` builds from a collected risk file. It is
+    optional and the file is identical without it. Nothing here fetches: this
+    module makes no request, and the values arrive already collected by a verb
+    that does. Both cells are written or neither is — a signal list with no date
+    beside it is the unfalsifiable form of exactly the claim it is making.
 
     UTF-8 with BOM, matching `export.save_to_csv`, so Excel opens it without
     mangling the Chinese headers.
@@ -864,17 +905,27 @@ def write_worklist_csv(worklist: Mapping[str, Any], path: str) -> str:
         "corpus_paper_count": "paper_count",
         "alias_group": "alias_group",
     }
+    risk_cells = risk_cells or {}
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
     with target.open("w", newline="", encoding="utf-8-sig") as handle:
         writer = csv.writer(handle)
         writer.writerow([column.zh for column in SCHEMA])
         for entry in worklist.get("entries", []):
-            writer.writerow([
-                entry.get(prefilled[column.key], "") if column.key in prefilled else ""
-                for column in SCHEMA
-            ])
-    logger.info("待查清单已写入: %s（%d 本刊待查）", target, len(worklist.get("entries", [])))
+            found = risk_cells.get(str(entry.get("journal") or "")) or {}
+            row = []
+            for column in SCHEMA:
+                if column.key in prefilled:
+                    row.append(entry.get(prefilled[column.key], ""))
+                elif column.key in ("risk_signals", "risk_checked_on"):
+                    row.append(found.get(column.key, ""))
+                else:
+                    row.append("")
+            writer.writerow(row)
+    annotated = sum(1 for entry in worklist.get("entries", [])
+                    if str(entry.get("journal") or "") in risk_cells)
+    logger.info("待查清单已写入: %s（%d 本刊待查%s）", target, len(worklist.get("entries", [])),
+                f"，其中 {annotated} 本已带公开风险信号" if annotated else "")
     return str(target)
 
 

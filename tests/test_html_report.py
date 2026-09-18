@@ -29,7 +29,7 @@ from datetime import datetime
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from check_your_advisor.profile import caveats, report  # noqa: E402
+from check_your_advisor.profile import caveats, html_report, report  # noqa: E402
 from check_your_advisor.profile.html_report import render_html  # noqa: E402
 
 _passed = 0
@@ -202,8 +202,10 @@ CHARTS = {
     "C-GANTT": fake_chart("C-GANTT", [{"name": "Recur00 Person", "years": [2019, 2020]}]),
     "C-LAG": fake_chart("C-LAG", [{"name": "Recur00 Person", "lag_years": 0}]),
     "C-SPAN": fake_chart("C-SPAN", [{"name": "Recur00 Person", "span_years": 4}]),
+    "C-POS": fake_chart("C-POS", [{"year": 2019, "records": 1, "first author": 1}]),
     "C-YEAR": fake_chart("C-YEAR", [{"year": 2019, "count": 1}]),
     "C-TEAM": fake_chart("C-TEAM", [{"authors": 3, "records": 2}]),
+    "C-NET": fake_chart("C-NET", [{"cluster": 1, "person": "Recur00 Person"}]),
 }
 
 
@@ -322,14 +324,20 @@ check("Section 14 is not inside any collapsed element",
       section_14.group(0) in collapsed_regions, False)
 check_true("Section 0 carries CAV-00 verbatim",
            caveats.CAVEATS["CAV-00"] in section_0.group(0))
-# Anchored on an entry that is refused by design rather than one that was merely
-# unavailable, so this does not have to be edited again the next time the
-# register moves an item between those two categories. Citation counts and the
-# h-index used to be the anchor here; they are computed now and their register
-# entry changed with them. A fitted slope over five right-censored integer
-# points is refused whatever the data source, so that entry stays put.
+# Re-anchored in round four, and the reason the previous anchor failed is worth
+# keeping. It was the fitted slope, chosen on the argument that a slope over five
+# right-censored points is refused "whatever the data source" and would therefore
+# stay put. It did not: round four kept the objection and changed the
+# presentation, and the entry was reworded. The lesson is that "refused by
+# design" is not a durable anchor — a decision is exactly the kind of thing that
+# gets revisited.
+#
+# What cannot be revisited is an entry whose absence is structural. PubMed has no
+# field distinguishing a PhD student from a postdoc or a technician, so no
+# decision and no data source available to this tool can promote that entry out
+# of the register. That is the anchor now.
 check_true("Section 14 names a dropped metric",
-           "Trends, fitted slopes" in section_14.group(0))
+           "Any distinction between PhD student" in section_14.group(0))
 check("every entry of the dropped register survives",
       sum(1 for name, _ in caveats.DROPPED_REGISTER if name.split(",")[0][:30] in section_14.group(0)),
       len(caveats.DROPPED_REGISTER))
@@ -466,11 +474,26 @@ computed = "\n".join(
 # below, against the roster and the order control, rather than by banning a
 # word the page is entitled to use.
 #
-# What stays banned here is what stays banned everywhere: a position inside a
-# reference population that does not exist (percentile, quantile) and a fitted
-# direction over five right-censored points (trend, slope).
-for term in ("percentile", "quantile", "trend", "slope"):
-    check(f"the rendered numbers never mention {term.strip()}", term in computed.lower(), False)
+# Nothing is banned outright here any more. "percentile" and "quantile" came off
+# in round four together with the objection behind them: there is a reference
+# population now, and it is not the set of corpora a user loaded —
+# `impact_reference` places a count inside every OpenAlex work sharing its topic
+# and year. `ranking`'s refusal of the *other* position is untouched.
+#
+# "trend" and "slope" came off in round four. The objection to a fitted
+# direction over a few right-censored points was never withdrawn — Section 9 now
+# prints the interval and the point count beside the slope instead of printing
+# the slope alone, and refuses to fit at all below four points. The rendered
+# page is held to the same condition as the report body (test_profile T60c):
+# the word may appear, bare confidence in it may not.
+check_true("a slope reaches the rendered page", "slope" in computed.lower())
+check_true("...with its interval rendered alongside it", "interval" in computed.lower())
+# This page is rendered without a reference payload, so the words must arrive
+# attached to the reason none were fetched rather than to an empty cell.
+check_true("the rendered page names the reference population",
+           "reference population" in computed.lower())
+check_true("...and says plainly that an absent one is not a low count",
+           "is not a low count" in computed.lower())
 check("no per-person row carries a percentage",
       any("%" in line for line in computed.splitlines() if line.startswith("| ")), False)
 check_true("the header states there is no ranking of people",
@@ -518,27 +541,60 @@ check("no letter grade in the embedded JSON either",
 
 print("\n--- figures and structure ---")
 
-check("all five figures are placed", len(re.findall(r"<figure id=", PAGE)), 5)
+check("every placed figure is on the page", len(re.findall(r"<figure id=", PAGE)),
+      len(html_report.FIGURE_PLACEMENT))
 check("the gantt lands in Section 2",
       'id="s2"' in PAGE and PAGE.index('id="s2"') < PAGE.index('id="fig-c-gantt"'), True)
-check("figure order follows report.py section order",
+check("the byline-position figure lands in Section 7",
+      'id="s7"' in PAGE and PAGE.index('id="s7"') < PAGE.index('id="fig-c-pos"'), True)
+check("the co-author network lands in Section 19",
+      'id="s19"' in PAGE and PAGE.index('id="s19"') < PAGE.index('id="fig-c-net"'), True)
+# Figures follow the *print* order of the sections they are pinned to, which is
+# not numeric order and not the placement table's own order: Section 19 is
+# printed third, right under Section 0 and Section 17, so its figure is the first
+# on the page even though its id sorts last. `_render_section` iterates
+# `report["sections"]` as given and must never start sorting by id.
+check("figure order follows report.py's section print order, not id order",
       [m for m in re.findall(r'<figure id="fig-([a-z-]+)"', PAGE)],
-      ["c-gantt", "c-lag", "c-span", "c-year", "c-team"])
-check("every figure has a figcaption", len(re.findall(r"<figcaption", PAGE)), 5)
+      ["c-net", "c-gantt", "c-lag", "c-span", "c-pos", "c-year", "c-team"])
+check("every figure has a figcaption", len(re.findall(r"<figcaption", PAGE)),
+      len(html_report.FIGURE_PLACEMENT))
 check("every figcaption states a k of N",
       len([c for c in re.findall(r"<figcaption[^>]*>(.*?)</figcaption>", PAGE, re.S)
-           if re.search(r"\d+ of \d+", c)]), 5)
+           if re.search(r"\d+ of \d+", c)]), len(html_report.FIGURE_PLACEMENT))
 check("a page built without charts renders no figure", "<figure" in BARE, False)
 check("a page built without charts still shows every caveat",
       [key for key, text in used.items() if text not in without_scripts(BARE)], [])
+
+# Section 18 is always open, so its journal table and its risk block both render
+# without a click however long they get. That is the whole reason 18 is in
+# ALWAYS_OPEN_SECTIONS: the edition, the retrieval date and the endpoint that
+# produced a statement are what qualify the number beside them, and a reader who
+# has to expand a disclosure to find them ends up with the number and none of it.
+_S18 = re.search(r'<section class="rep" id="s18".*?</section>', PAGE, re.S).group(0)
+check("Section 18 contains no <details>", "<details" in _S18, False)
+check_true("...and carries the 风险信号 column header", "风险信号" in _S18)
+check_true("...and says the signals were not collected, rather than leaving a blank",
+           "未采集" in _S18)
+check_true("...and names the verb that collects them",
+           "check-your-advisor journal-risk" in _S18)
+check_true("...and refuses the word the whole block exists not to print",
+           "does not call any journal predatory" in _S18
+           or "None of them says a journal is predatory" in _S18)
+check_true("the header stamp tells a reader up front that no journal is rated",
+           "never a rating" in PAGE)
+# The long register prints in full, uncollapsed, like every other caveat block.
+check("every JRN-08..12 caveat is on the page",
+      [key for key in ("JRN-08", "JRN-09", "JRN-10", "JRN-11", "JRN-12")
+       if key not in _S18], [])
 check("one h1", PAGE.count("<h1"), 1)
-# 20 report sections (0-14, plus 15 citation impact, 16 composite score and star
-# band, 17 graduates on record, 18 journal-level metrics and 19 co-author
-# clusters) and the embedded-JSON block. 17 and 18 are rendered even with no
-# table supplied, because a missing section reads as a question nobody asked;
-# 19 needs no table and renders always, printing why it did not partition when
-# the corpus is below its floor.
-check("one h2 per section plus the data block", PAGE.count("<h2"), 21)
+# 21 report sections (0-14, plus 15 citation impact, 16 composite score and star
+# band, 17 graduates on record, 18 journal-level metrics, 19 co-author clusters
+# and 20 student evaluations) and the embedded-JSON block. 17, 18 and 20 are
+# rendered even with no table supplied, because a missing section reads as a
+# question nobody asked; 19 needs no table and renders always, printing why it
+# did not partition when the corpus is below its floor.
+check("one h2 per section plus the data block", PAGE.count("<h2"), 22)
 check_true("a skip link is the first focusable element",
            PAGE.index('class="skip"') < PAGE.index("<header"))
 check_true("wide figures are keyboard scrollable", 'tabindex="0"' in PAGE)
@@ -556,17 +612,82 @@ check_true("focus stays visible", ":focus-visible" in PAGE)
 
 print("\n--- refusal ---")
 
-truncated = corpus([paper(1, [author("Liu Hua"), pi()])])
-truncated["query"]["esearch_count"] = 900
-truncated["query"]["pmids_returned"] = 500
-refusal = render_html(report.build_report(truncated, {}, None, FIXED_NOW), CHARTS)
-check("a refusal renders the gate id", "gate G1" in refusal, True)
-check("a refusal names the gate", "truncation" in refusal, True)
-check("a refusal prints the observed values", "900" in refusal and "500" in refusal, True)
+# G4 rather than G2: the identity conditions became warnings, so the first
+# thing still refused is a corpus with no structured author records. What is
+# under test here is the refusal page, not which gate produced it.
+refused = corpus([paper(1, [author("Liu Hua"), pi()])])
+refused["papers"].append({"pmid": "9", "title": "t", "pub_date": "2024", "authors": []})
+refusal = render_html(report.build_report(refused, {}, None, FIXED_NOW), CHARTS)
+check("a refusal renders the gate id", "gate G4" in refusal, True)
+check("a refusal names the gate", "no structured authors" in refusal, True)
+check("a refusal prints the observed values", "pmid" in refusal, True)
 check("a refusal renders no figure", "<svg" in refusal, False)
 check("a refusal renders no section body", "Corpus provenance" in refusal, False)
 check("a refusal carries exactly one script, the data block", refusal.count("<script"), 1)
 check("the refusal JSON parses", isinstance(embedded_json(refusal), dict), True)
+
+# An incomplete harvest is the case that used to land here as gate G1. It now
+# renders as a whole page carrying one extra line, so the reader gets the
+# numbers and the warning instead of an empty document.
+capped = corpus([paper(1, [author("Liu Hua"), pi()])])
+capped["query"].update({"esearch_count": 900, "pmids_returned": 500,
+                        "max_records": 500, "pages_fetched": 1, "duplicates_dropped": 0})
+capped_page = render_html(report.build_report(capped, {}, None, FIXED_NOW), CHARTS)
+check("an incomplete corpus still renders its sections",
+      "Corpus provenance" in capped_page, True)
+check("...and prints retrieved of matched",
+      "retrieved 500 of 900 records esearch matched" in capped_page, True)
+check("...and prints the shortfall in bold",
+      "<strong>400 of those 900 records were never retrieved.</strong>" in capped_page, True)
+
+# The other two conditions that used to land on the refusal page. G2 and G3 are
+# warnings now: the whole report renders, and each affected section opens with a
+# callout of its own rather than another caveat blockquote a reader would skim.
+warned = corpus([paper(1, [author("Liu Hua"), pi()])], fallback_fired=True)
+# The name stays TARGET, which is the name on this corpus's only byline. It read
+# "Zhu Guangwei" — a name nobody here holds — and that made the fixture raise G7
+# as well, which is correct behaviour and not what these four checks are about.
+# Only orcid / affiliation_keywords / email_domains are blanked, which is what
+# G2 and G3 are conditioned on.
+warned["identity"] = {"author_name": TARGET, "orcid": "",
+                      "affiliation_keywords": [], "email_domains": []}
+warned_report = report.build_report(warned, {}, None, FIXED_NOW)
+warned_page = render_html(warned_report, CHARTS)
+check("a warned corpus renders every section", "Corpus provenance" in warned_page, True)
+check("...including the one that checks for exactly this failure",
+      "Co-author clusters" in warned_page, True)
+check("...and both warnings are raised, not just the first",
+      [w["id"] for w in warned_report["warnings"]], ["G2", "G3"])
+check("...each rendered in its own callout, three sections times two warnings",
+      warned_page.count('class="warnbox"'), 6)
+check("...marked up as a note for a screen reader", 'role="note"' in warned_page, True)
+check("...not as another caveat blockquote",
+      'class="warnbox" role="note"><blockquote' in warned_page, False)
+check("...with the warning text in bold",
+      "<strong>Warning G2 (identity fallback)" in warned_page, True)
+check("...naming the observed values", "papers_stamped_unverified=0" in warned_page, True)
+check("...and the fix", "Fix: Set orcid, email_domains or affiliation_keywords" in warned_page, True)
+# The fix text must not send the reader after an id that would clear nothing on
+# a PubMed-only harvest, which is what "set at least one of ... /
+# openalex_author_id" did. It must not deny the field either: once the merge
+# folds a confirming OpenAlex work in, a PubMed record does carry the id at
+# record level, and "PubMed records never carry that field" went out verbatim on
+# every fired G3.
+check("...which says outright that an id alone clears this only above the threshold",
+      "alone clears this only once it reaches min_openalex_record_share" in warned_page, True)
+check("...and no longer denies the field the merge writes onto a PubMed record",
+      "never carry that field" in warned_page, False)
+check("the callout is styled without depending on colour",
+      "border:3px solid var(--ink)" in warned_page, True)
+check("...and does not break across printed pages",
+      ".warnbox,tr{break-inside:avoid}" in warned_page, True)
+# The callout must sit above the section's prose, not below it, or it is a
+# footnote to the thing it is warning about.
+_s0 = warned_page.index('id="s0"')
+check("the callout precedes the section prose",
+      warned_page.index('class="warnbox"', _s0) < warned_page.index("<p>", _s0), True)
+check("Section 14 records the downgrade on the page",
+      "Downgraded on this run" in warned_page, True)
 
 
 # ============================================================

@@ -25,11 +25,25 @@ from typing import Any
 # exclude exactly the records the shared helper cannot date, not a private
 # approximation of them.
 from ..corpus import _date_iso
-from ..pubmed_api import _affiliation_matches, _email_domain_matches, _name_matches
+from ..pubmed_api import (
+    _affiliation_matches,
+    _email_domain_matches,
+    _name_matches,
+    normalise_openalex_id,
+    record_openalex_author_ids,
+)
 
 # Section 6.1. Ranked so a stronger identifier always beats a weaker one no
 # matter where the two candidates sit in the byline.
-EVIDENCE_RANK = {"orcid": 3, "email": 2, "affiliation": 1, "name_only": 0}
+#
+# `openalex` sits below `orcid` and above `email` because of where it comes
+# from, not because of how often it is right. An ORCID match is the person's own
+# identifier compared against the byline's; an OpenAlex author id is one
+# database's clustering decision, correct most of the time and wrong in a way
+# nothing on the page can show. It outranks an email domain because a domain is
+# shared by everybody at an institution while an author id names one cluster.
+# The numbers moved up by one to make room; only the order is load-bearing.
+EVIDENCE_RANK = {"orcid": 4, "openalex": 3, "email": 2, "affiliation": 1, "name_only": 0}
 
 # Section 6.5. `parse_article` extracts no PublicationType, so the title is the
 # only separator available. Anchored at the start and word-bounded so
@@ -62,11 +76,50 @@ EXCLUSION_REASONS = (
 
 
 def evidence_tier(author: dict[str, Any], identity: dict[str, Any]) -> str:
-    """Strongest identity evidence this byline entry carries for `identity`."""
+    """Strongest identity evidence this byline entry carries for `identity`.
+
+    This is the profile layer's own derivation, computed from the raw byline
+    entry and the recorded identity block, ignoring the role string entirely. It
+    has to agree with the marker `pubmed_api` / `openalex` wrote at harvest time,
+    or the corpus's evidence histogram and its per-paper `pi_evidence` will
+    describe the same corpus differently. Adding a tier to one and not the other
+    is the way that happens, so both were changed in the same pass.
+
+    Strictly per byline entry, and it stays that way: an OpenAlex author id that
+    a merged record carries at record level says the *paper* is this person's,
+    not which byline slot they hold, so it is applied in `resolve_pi` — after
+    the slot is chosen — rather than handed to every entry here.
+
+    Which puts that agreement at two levels, and they are answered separately.
+    At byline level this function and the harvest-time marker say the same thing
+    about a merged record: no surviving entry carries an id, and the marker says
+    name-only. At record level `resolve_pi`, `report.openalex_id_record_share`
+    and `cli._corpus_counts` all read `record_openalex_author_ids` and all say
+    openalex. So a merged record whose `pi_evidence` is openalex while its role
+    marker is not is the two levels speaking, not a disagreement; the real
+    disagreement was `_corpus_counts` reading the byline-level statement off the
+    role string and printing it as the record-level one — `0 of 10 … name_only
+    10` one line above `openalex author id on records: 10 of 10`.
+
+    One thing that agreement does not cover, and this function is where it goes
+    missing: the target *name*. This function is reached only for byline entries
+    `resolve_pi` already matched the name against, while
+    `report.openalex_id_record_share` and `cli._corpus_counts` never look at the
+    name at all. Profile the same corpus under a name nobody on it holds and the
+    two of them go on reporting `8 of 8` while `resolve_pi` rejects every record
+    — three readers agreeing about a corpus no section is about. Nothing here
+    fixes that, because nothing here can: the number is measured in
+    `report.target_name_record_reach`, printed in Section 1 on every run, and
+    raised as warning G7 when it is zero.
+    """
     orcid = (identity.get("orcid") or "").strip()
     author_orcid = (author.get("orcid") or "").strip()
     if orcid and author_orcid and author_orcid.lower() == orcid.lower():
         return "orcid"
+    wanted_openalex = normalise_openalex_id(identity.get("openalex_author_id"))
+    author_openalex = normalise_openalex_id(author.get("openalex_author_id"))
+    if wanted_openalex and author_openalex and wanted_openalex == author_openalex:
+        return "openalex"
     if _email_domain_matches(author.get("email") or "", identity.get("email_domains") or []):
         return "email"
     if _affiliation_matches(author.get("affiliation") or "", identity.get("affiliation_keywords") or [])[0]:
@@ -82,6 +135,17 @@ def resolve_pi(paper: dict[str, Any], target_name: str, identity: dict[str, Any]
     skips every name match that holds no first/last/corresponding role, so a
     corpus built through it cannot then be used to measure the PI's own byline
     position without the filter becoming the measurement.
+
+    Two derivations meet here and they are ranked separately on purpose. Which
+    byline entry is the PI is decided by `evidence_tier` alone, from what each
+    entry itself carries. What the paper is *backed by* can additionally come
+    from the record: a record both databases hold keeps PubMed's byline, so the
+    OpenAlex author id that confirmed it survives as a record-level fact and no
+    entry carries it. That fact raises the reported tier and is kept out of the
+    tie-break, because a tier every candidate shares discriminates between none
+    of them — feeding it into the tie-break would let it overturn the
+    affiliation and email matches that do, and move `pi_index` onto a different
+    person.
     """
     target_parts = (target_name or "").lower().split()
     authors = paper.get("authors") or []
@@ -91,6 +155,14 @@ def resolve_pi(paper: dict[str, Any], target_name: str, identity: dict[str, Any]
         if isinstance(author, dict) and _name_matches(author, target_parts)
     ]
     if not candidates:
+        # `rejected` here means "the target name is not on this byline", and it is
+        # the one disposition no other reader of the corpus can see: nothing else
+        # in the pipeline consults `target_name`. A corpus profiled under a
+        # mistyped name takes this branch on every record and used to leave no
+        # trace of it anywhere on the page — the report still printed a roster, a
+        # timeline and a span, all of them about a name the corpus does not hold.
+        # `report.target_name_record_reach` counts these records with this same
+        # matcher and warning G7 says so.
         return {"disposition": "rejected", "pi_index": None, "pi_evidence": "", "pi_ambiguous": False}
 
     best_rank = max(EVIDENCE_RANK[tier] for _, tier in candidates)
@@ -99,7 +171,24 @@ def resolve_pi(paper: dict[str, Any], target_name: str, identity: dict[str, Any]
     # reader can see the guess rather than inherit it silently.
     pi_index, tier = tied[0]
     ambiguous = len(tied) > 1
-    disposition = "name_only" if best_rank == 0 else "verified"
+    # The record-level half, read through the same function
+    # `report.openalex_id_record_share` counts with and `cli._corpus_counts`
+    # raises the harvested record's tier with, so the per-paper tier, the
+    # corpus-wide share and Section 1's evidence histogram — the three readers
+    # of this one fact — cannot describe *this* fact three ways.
+    #
+    # The scope of that claim is the OpenAlex id and nothing wider. The three
+    # readers agree about which records carry the id; they do not agree about
+    # which records are this person's, because only this function has been told
+    # who that is. `target_name` is checked above and nowhere else in the corpus,
+    # so on a mistyped name the other two report full coverage over records this
+    # one rejects outright. `report.target_name_record_reach` measures exactly
+    # that gap and Section 1 prints it beside the other two ratios.
+    wanted_openalex = normalise_openalex_id(identity.get("openalex_author_id"))
+    if EVIDENCE_RANK[tier] < EVIDENCE_RANK["openalex"] and wanted_openalex \
+            and wanted_openalex in record_openalex_author_ids(paper):
+        tier = "openalex"
+    disposition = "name_only" if EVIDENCE_RANK[tier] == 0 else "verified"
     return {
         "disposition": disposition,
         "pi_index": pi_index,
@@ -158,6 +247,10 @@ def prepare_paper(paper: dict[str, Any], identity: dict[str, Any]) -> dict[str, 
     `persons` is the author list with consortium entries removed. It is built
     before the first/last-slot tests because a trailing consortium entry would
     otherwise occupy the senior slot and hide the person who actually holds it.
+
+    The PI slot is resolved here on every record and is never read back off the
+    record, however the record spells it. See the comment at the `resolve_pi`
+    call below for why a cached `pi_index` is not trusted.
     """
     authors = [a for a in (paper.get("authors") or []) if isinstance(a, dict)]
     collective = [is_collective_name(a) for a in authors]
@@ -170,18 +263,27 @@ def prepare_paper(paper: dict[str, Any], identity: dict[str, Any]) -> dict[str, 
             person_index_of[index] = cursor
             cursor += 1
 
-    pi_index = paper.get("pi_index")
-    if pi_index is None:
-        # A corpus written by the profile fetch stage carries these fields. A
-        # hand-built or older corpus does not, so resolve them here rather than
-        # silently reporting on a paper with no located PI.
-        resolved = resolve_pi(paper, identity.get("author_name", ""), identity)
-        pi_index = resolved["pi_index"]
-        pi_evidence = resolved["pi_evidence"]
-        pi_ambiguous = resolved["pi_ambiguous"]
-    else:
-        pi_evidence = paper.get("pi_evidence", "")
-        pi_ambiguous = bool(paper.get("pi_ambiguous"))
+    # Resolved on every record, and a `pi_index` the record already carries is
+    # ignored rather than reused. There was a short-circuit here that skipped
+    # `resolve_pi` entirely for such a record, justified by a comment saying the
+    # profile fetch stage writes those fields. It does not: `parse_article`
+    # produces no `pi_index`, `cli._profile_corpus` copies the paper list through
+    # untouched, `export.save_to_json` adds nothing, and the only writer of the
+    # key anywhere in the package is this function and `resolve_pi` above. So the
+    # branch was unreachable on a harvested corpus and reachable only from a
+    # hand-edited file — the one input whose cached value has no reason to be
+    # current.
+    #
+    # It also silently outranked `--pi-name`. The name the report is about is
+    # settled per run, and a cached slot is a slot for whatever name the file was
+    # written under; taking it meant Section 7 kept reporting the cached person's
+    # last-author slots directly beneath warning G7's sentence saying there was
+    # no byline slot to report. Resolving unconditionally is what makes that
+    # sentence true on both corpus shapes.
+    resolved = resolve_pi(paper, identity.get("author_name", ""), identity)
+    pi_index = resolved["pi_index"]
+    pi_evidence = resolved["pi_evidence"]
+    pi_ambiguous = resolved["pi_ambiguous"]
 
     slot0_collective = bool(collective) and collective[0]
     return {
@@ -260,10 +362,15 @@ def apply_record_exclusions(prepared: Sequence[dict[str, Any]]) -> dict[str, Any
     seen: dict[str, dict[str, Any]] = {}
     deduped: list[dict[str, Any]] = []
     for paper in survivors:
-        if paper["pmid"] in seen:
+        # An empty PMID is not an identity. Merged OpenAlex-only records carry
+        # none, and keying them all on "" collapsed the entire second source to
+        # a single paper. The DOI pass below already guards this way; this one
+        # did not. Records with no PMID fall through to that pass instead.
+        if paper["pmid"] and paper["pmid"] in seen:
             excluded["duplicate_pmid"].append(paper["pmid"])
             continue
-        seen[paper["pmid"]] = paper
+        if paper["pmid"]:
+            seen[paper["pmid"]] = paper
         deduped.append(paper)
 
     by_doi: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -534,8 +641,15 @@ def build_people(
             "first_slot_pmids": [entry["pmid"] for entry in first_slots],
         })
 
-    # R5: first appearance, then name. Never by any count — sorting by count
-    # builds a leaderboard, and a leaderboard is a ranking of people.
+    # R5: first appearance, then name. This stays the order `people` is returned
+    # in, and it is not a ranking: it is the order the timeline figure reads and
+    # the order `person_id` is handed out in, both of which need to be stable
+    # against a count that moves every time the corpus is re-harvested.
+    #
+    # Round four added `rank_people` below, which *does* order people by a count.
+    # The two are deliberately separate calls rather than a flag on this one: a
+    # caller that wants a leaderboard has to ask for one by name, and the roster
+    # a reader sees first is still the one nobody's output can reorder.
     people.sort(key=lambda person: (person["first_date"], person["name"]))
     for person_id, person in enumerate(people):
         person["person_id"] = person_id
@@ -555,6 +669,102 @@ def build_people(
         "sole_author_papers": sole_author_papers,
         "lead_stratum_by_pmid": lead_stratum_by_pmid,
         "flips": _lead_to_senior_flips(people),
+    }
+
+
+#: What `rank_people` will order a roster by. Each maps to one integer already
+#: on every person record, so a rank is a re-reading of a number the report
+#: already prints, never a new measurement and never a composite of several.
+#: A key absent from here is refused by name rather than silently ignored.
+RANKABLE: dict[str, str] = {
+    "first_slots": "n_first_slots",
+    "appearances": "n_appearances",
+    "span": "span_years",
+}
+
+#: Printed beside any ranked roster. A rank here is a position among *the people
+#: this one corpus happens to name*, which is not a statement about anybody's
+#: standing anywhere else — the denominator is the whole caveat, so it travels
+#: with the rank instead of being left to the reader to remember.
+RANK_BASIS = (
+    "Rank among the {n} people this corpus names, by {label}. The denominator is "
+    "the roster, not a field, a department or a cohort: someone who published "
+    "elsewhere, left before the window opened or never appeared in a PubMed byline "
+    "is not below anyone here, they are absent. Ties share a rank and the next "
+    "rank is skipped, so positions are comparable but not consecutive."
+)
+
+
+def rank_people(
+    people: Sequence[dict[str, Any]],
+    by: str = "first_slots",
+) -> dict[str, Any]:
+    """
+    Order a roster by one count. Round four; refused in rounds one through three.
+
+    The refusal it replaces was not about arithmetic — the counts were always
+    printed, one line each, in Section 2. It was that arranging people by them
+    turns a description into a standing, and this tool is read by someone
+    deciding where to spend five years. That objection has not stopped being
+    true; the user asked for the ordering anyway, and this function is the
+    ordering, kept in one named place rather than spread through the report.
+
+    What it does *not* do is the part still worth keeping:
+
+    - **No composite.** `by` picks exactly one of `RANKABLE`, each a count the
+      report already shows. There is no weighted blend of them, because a blend
+      would need weights nobody can defend for people.
+    - **No percentile, no grade.** A position among a handful of colleagues is
+      not a quantile, and `n` is printed beside every rank so a "1st" that is
+      first of two cannot read as first of many.
+    - **Ties are shared, not broken.** Two people with the same count get the
+      same rank. Breaking a tie on an unrelated field would invent a difference
+      the data does not hold.
+    - **The roster itself is untouched.** The input list is not reordered and
+      nothing is written back onto the person records; the ranked view is a new
+      list of new dicts.
+
+    Returns `{"by", "field", "label", "n", "basis", "ranked"}`, where `ranked`
+    holds `{"rank", "tied", "value", ...}` plus the person's own keys.
+    """
+    if by not in RANKABLE:
+        raise ValueError(
+            f"rank_people cannot order by {by!r}. "
+            f"Known keys: {', '.join(sorted(RANKABLE))}."
+        )
+    field = RANKABLE[by]
+    label = by.replace("_", " ")
+
+    # Descending by the count, then the roster's own stable order as the
+    # tiebreak, so two runs over one corpus list tied people identically.
+    ordered = sorted(
+        people,
+        key=lambda person: (-int(person[field]), person["first_date"], person["name"]),
+    )
+
+    ranked: list[dict[str, Any]] = []
+    previous_value: Any = object()
+    previous_rank = 0
+    for position, person in enumerate(ordered, start=1):
+        value = int(person[field])
+        if value == previous_value:
+            rank = previous_rank
+        else:
+            rank = position
+            previous_value, previous_rank = value, position
+        ranked.append({**person, "rank": rank, "value": value})
+
+    counts = [row["rank"] for row in ranked]
+    for row in ranked:
+        row["tied"] = counts.count(row["rank"]) > 1
+
+    return {
+        "by": by,
+        "field": field,
+        "label": label,
+        "n": len(ranked),
+        "basis": RANK_BASIS.format(n=len(ranked), label=label),
+        "ranked": ranked,
     }
 
 

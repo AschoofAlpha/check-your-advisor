@@ -4,9 +4,10 @@ Whether this corpus looks like one person's collaboration network or several.
 The corpus decides every number in the report, and the way it goes wrong is
 always the same: papers by a different person with the same name get in, and the
 roster, the time-to-first-author and the turnover figures are all wrong in a way
-that looks perfectly normal on the page. Gate G3 catches the worst case — a
-corpus harvested with no identity evidence at all — but says nothing about a
-corpus harvested with weak evidence, which is where the failure actually lives.
+that looks perfectly normal on the page. Warning G3 catches the worst case — a
+corpus no configured identity evidence reached, printed in bold at the top of
+this section — but it says nothing about a corpus whose evidence did reach the
+records and is weak anyway, which is where the failure actually lives.
 
 The signal here is collaboration, not subject matter. Remove the PI, who is on
 every record by construction, and ask which records are still tied together by a
@@ -60,6 +61,25 @@ MIN_N_COHESION = 5
 # summarised as a count. Not a judgement about them — a page with thirty
 # one-record clusters listed in full buries the ones worth reading.
 CLUSTER_DETAIL_MIN = 2
+
+# How many of a cluster's records a person must be on to count as recurring in
+# it. One threshold, used for both `recurring_people` and `edges`, because they
+# are the same rule seen twice: the people worth naming and the people worth
+# joining are the same people. Two copies of the number would let a figure draw
+# an edge to a person it does not draw a node for.
+#
+# Two reasons for the rule itself, and the second is the load-bearing one:
+#
+# - It bounds the output. One 20-author record is 190 pairs, and a cluster of
+#   thirty such records is a list nobody can read and a figure nobody can draw.
+# - A person seen once is on one record and explains nothing about why that
+#   record joined this cluster. Drawing them would put the corpus's whole author
+#   list on the page under the name "collaboration network", which is the
+#   1934x21506 failure the figure set exists to avoid.
+#
+# So an edge here means: both endpoints recur in this cluster, and they are on
+# at least one record together. Not "these two people collaborate a lot".
+RECURRENCE_MIN_RECORDS = 2
 
 
 def _person_names(paper: Mapping[str, Any]) -> list[str]:
@@ -147,11 +167,26 @@ def coauthor_clusters(
         # Only people who recur inside the cluster: the ones that made it a
         # cluster. A name appearing once is on one record and explains nothing.
         recurring = Counter()
+        per_record: list[set[str]] = []
         for record in records:
-            for name in set(_person_names(record)):
-                if pi_key and name.casefold() == pi_key:
-                    continue
+            names = {name for name in _person_names(record)
+                     if not (pi_key and name.casefold() == pi_key)}
+            per_record.append(names)
+            for name in names:
                 recurring[name] += 1
+        recurring_names = {name for name, count in recurring.items()
+                           if count >= RECURRENCE_MIN_RECORDS}
+        # Shared bylines among those people, counted once per record. Emitted
+        # here rather than derived later so the figure that draws this network
+        # reads the partition instead of re-deriving it from the corpus: two
+        # walks over the same author lists is two chances to disagree about who
+        # is in a cluster, and the drawing is the half nobody would check.
+        pairs: Counter = Counter()
+        for names in per_record:
+            shared = sorted(names & recurring_names)
+            for left_index, left in enumerate(shared):
+                for right in shared[left_index + 1:]:
+                    pairs[(left, right)] += 1
         clusters.append({
             "size": len(indices),
             "pmids": [str(r.get("pmid", "")) for r in records],
@@ -160,7 +195,11 @@ def coauthor_clusters(
             "year_range": (min(years), max(years)) if years else None,
             "recurring_people": [{"name": name, "n_records": count}
                                  for name, count in sorted(recurring.items(), key=lambda kv: (-kv[1], kv[0]))
-                                 if count >= 2],
+                                 if count >= RECURRENCE_MIN_RECORDS],
+            # Ordered by the two names, never by the count: ordering edges by
+            # weight is the first step to ordering the people on them.
+            "edges": [{"a": left, "b": right, "n_records": count}
+                      for (left, right), count in sorted(pairs.items())],
             "detailed": len(indices) >= CLUSTER_DETAIL_MIN,
         })
 

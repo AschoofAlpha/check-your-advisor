@@ -165,10 +165,14 @@ SCORING_EXCLUSIONS: dict[str, tuple[tuple[str, str], ...]] = {
             "whole output; the ordering is the reader's to make and to own.",
         ),
         (
-            "Trends, fitted slopes, year-over-year percentage change",
-            "Refused, unchanged from the original register: a handful of right-censored "
+            "Trends, fitted slopes, year-over-year percentage change — as inputs to the score",
+            "Refused here, unchanged from the original register: a handful of right-censored "
             "integer points do not support a slope. `records_per_year` therefore enters as a "
-            "median over fully observed years, which is order-free by construction.",
+            "median over fully observed years, which is order-free by construction. Round four "
+            "did not touch this: Section 9 now prints a fitted slope beside its interval, but "
+            "`composite_score` reads no slope and no direction, so nothing on this page moves "
+            "because output rose or fell. The narrowing in the heading is the whole change — "
+            "what is refused is the slope as an *input here*, not the slope's existence.",
         ),
     ),
 }

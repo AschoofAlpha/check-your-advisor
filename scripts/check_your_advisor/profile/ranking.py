@@ -18,6 +18,13 @@ What moved, and the argument that lets it move:
 - **Stars.** A star count is the score coarsened, not a new measurement. The band
   edges are declared module constants, they are equal width, and they are printed
   with the result — see `STAR_BANDS` and the argument in `star_rating`.
+- **Letters.** A letter is the *same* coarsening spelled differently, on the
+  user's instruction. `LETTER_BANDS` is derived from `STAR_BANDS` rather than cut
+  again, so the two can never put one score in different bands; see the argument
+  in `letter_grade`. Round one refused letters while producing stars and recorded
+  the refusal as deliberate. That decision has been reversed, so the entry that
+  recorded it is gone from `RANKING_EXCLUSIONS` — a register that still refused
+  what the module emits would be the drift it exists to catch.
 - **Direction.** `comparative_statement` will say which of two corpora scored
   higher. It says it about the score and only about the score, it always carries
   the difference and both component counts, and it refuses outright when the two
@@ -26,8 +33,8 @@ What moved, and the argument that lets it move:
 What did **not** move is in `RANKING_EXCLUSIONS`, in full and machine-readable,
 kept in two lists because `scoring`'s distinction between a verdict and a missing
 input holds here too: a position inside a reference population is not computed
-because no such population exists here, whereas letter tiers and fitted slopes
-are refused outright and a better data source would not reopen them. The rank
+because no such population exists here, whereas a fitted slope is refused
+outright and a better data source would not reopen it. The rank
 above is emphatically not the first of those — it is a position among the few
 corpora somebody loaded, and it says so wherever it is printed.
 
@@ -57,6 +64,10 @@ from .scoring import COMPONENT_NAMES
 
 __all__ = [
     "COMPARISON_CAVEAT",
+    "LETTER_BANDS",
+    "LETTER_BASIS",
+    "LETTER_SCALE_NOTE",
+    "LETTER_SYMBOLS",
     "MIN_RANKED_CORPORA",
     "RANKING_EXCLUSIONS",
     "RANK_METHOD",
@@ -69,6 +80,7 @@ __all__ = [
     "STAR_SCALE_NOTE",
     "TIE_DECIMALS",
     "comparative_statement",
+    "letter_grade",
     "rank_corpora",
     "star_rating",
 ]
@@ -132,6 +144,38 @@ STAR_BASIS = (
     "score coarsened and nothing else."
 )
 
+# One letter per star band, indexed by star count: LETTER_SYMBOLS[stars - 1].
+# Five symbols because there are five bands, and the table below is derived from
+# STAR_BANDS rather than written out, so "the same bands" is structurally true
+# instead of being a claim in a comment that a later edit could falsify.
+#
+# A-E and not A-D-F. The lowest band is where a corpus that *did* score lands —
+# `star_rating` refuses a zero-star band for exactly this reason — and F is the
+# one letter that is read as a verdict on a person rather than as a position on a
+# scale. E carries the same information and none of the connotation.
+LETTER_SYMBOLS: tuple[str, ...] = ("E", "D", "C", "B", "A")
+
+LETTER_BANDS: tuple[tuple[float, str], ...] = tuple(
+    (lower, LETTER_SYMBOLS[stars - 1]) for lower, stars in STAR_BANDS
+)
+
+LETTER_SCALE_NOTE = "; ".join(
+    f"{letter} = {lower:g}-"
+    f"{SCORE_SCALE_MAX if letter == LETTER_SYMBOLS[-1] else lower + STAR_BAND_WIDTH:g}"
+    for lower, letter in LETTER_BANDS
+)
+
+LETTER_BASIS = (
+    f"The same {STAR_MAX} bands the star count uses, {STAR_BAND_WIDTH:g} points wide over the "
+    f"0-{SCORE_SCALE_MAX:g} composite score, with a letter in place of a star "
+    f"({LETTER_SCALE_NOTE}). The edges are round numbers on the score's own scale, not cut "
+    "points measured off any group of researchers, so a letter is the score coarsened and "
+    "nothing else. It is therefore not a percentile and not a quantile: nothing in this toolkit "
+    "knows what any other researcher scored, so there is no population for a letter to be a "
+    "position inside. It reads one corpus of publications against a fixed scale and it orders "
+    "no person."
+)
+
 RANK_METHOD = (
     "standard competition ranking (1, 2, 2, 4) on the composite score, highest first, with "
     f"ties decided on the score as printed to {TIE_DECIMALS} decimal. The position is held "
@@ -162,19 +206,22 @@ COMPARISON_CAVEAT = (
 
 RANKING_EXCLUSIONS: dict[str, tuple[tuple[str, str], ...]] = {
     # Absent by decision. A better data source would not change these.
+    #
+    # "Letter tiers" used to head this list, on the argument that stars and
+    # letters were a deliberate split between two coarsenings of one number. The
+    # user reversed that and letters are produced now, so the entry is gone
+    # rather than softened: this register is read as a list of what the module
+    # will not emit, and an entry refusing something it does emit is worse than
+    # no entry at all.
     "refused_by_design": (
         (
-            "Letter tiers",
-            "Not produced. Stars are produced and letters are not, which is a deliberate split "
-            "between two coarsenings of the same number rather than an inconsistency to be "
-            "tidied away. Recorded here so that a later reader does not unify them and reverse "
-            "a decision they were not party to.",
-        ),
-        (
-            "Trends, fitted slopes, year-over-year change",
-            "Refused, unchanged from round one: a handful of right-censored integer points do "
-            "not support a slope. Nothing in this module reads a time series, and a rank is a "
-            "position at one moment, never a movement between two.",
+            "Trends, fitted slopes, year-over-year change — as anything a rank reads",
+            "Refused here, unchanged from round one: a handful of right-censored integer points "
+            "do not support a slope. Nothing in this module reads a time series, and a rank is a "
+            "position at one moment, never a movement between two. Round four left that intact — "
+            "`profile/trends.py` fits a slope for Section 9 and prints its interval beside it, "
+            "but no rank, band or letter on this page is computed from a direction. No corpus "
+            "outranks another for having risen.",
         ),
     ),
     # Absent because the input does not exist here. A different sentence.
@@ -272,6 +319,7 @@ def _resolve(entry: Any, fallback_label: str) -> _Resolved:
 
     if _is_score_dict(entry):
         label, source, refused, gate = fallback_label, "", False, None
+        warnings: Sequence[Any] = ()
         score: Mapping[str, Any] | None = entry
     else:
         label = str(entry.get("label") or "").strip() or fallback_label
@@ -279,6 +327,8 @@ def _resolve(entry: Any, fallback_label: str) -> _Resolved:
         refused = bool(entry.get("refused"))
         raw_gate = entry.get("gate")
         gate = raw_gate if isinstance(raw_gate, Mapping) else None
+        raw_warnings = entry.get("warnings")
+        warnings = raw_warnings if isinstance(raw_warnings, (list, tuple)) else ()
         raw_score = entry.get("score")
         score = raw_score if isinstance(raw_score, Mapping) else None
 
@@ -294,6 +344,29 @@ def _resolve(entry: Any, fallback_label: str) -> _Resolved:
         return unranked(
             f"the report for this corpus was refused at gate {gate_id} ({gate_name}), so there "
             "is no score to place"
+        )
+    if warnings:
+        # The report was built and its score is inside the row. What is withheld
+        # is the position: a warning says either that this corpus may describe
+        # several researchers or that it is part of what the query matched, and a
+        # rank is a claim about one whole corpus about one person. This is the
+        # same outcome the corpus had when each warning was a gate — the report is
+        # what changed, not its standing beside other corpora.
+        #
+        # The reason names the warning and stops. It used to assert "so it may
+        # describe more than one researcher", which is what G2 and G3 mean and is
+        # not what G1 means: a truncated harvest of one person is still one
+        # person, and the row said otherwise for every such corpus.
+        named = ", ".join(
+            f"{(item or {}).get('id', '?')} ({(item or {}).get('name', '')})"
+            for item in warnings
+            if isinstance(item, Mapping)
+        ) or "a warning"
+        return unranked(
+            f"this corpus carries warning {named}; the report and its score are in the row, but "
+            "a rank compares corpora that are each complete and each about one person, and this "
+            "one is not certified to be, so the position is withheld",
+            _scored_components(score) if score is not None else (),
         )
     if score is None:
         return unranked("this corpus carries no composite score")
@@ -346,7 +419,9 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
 
     Returns:
       ranked        entries in rank order, each with `rank`, `score`, `stars`,
-                    `n_components`, `components`, `tied_with` and `ranked=True`.
+                    `letter`, `n_components`, `components`, `tied_with` and
+                    `ranked=True`. `stars` and `letter` are one band read two
+                    ways — see `letter_grade` — never two independent cuts.
       unranked      entries that took no position — a refused report, an absent
                     score, a suppressed score — each with `rank=None`,
                     `ranked=False` and its own `reason`. Never dropped, never
@@ -408,6 +483,10 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
             rank = index + 1
             if index and ordered[index - 1].value == item.value:
                 rank = ranked[index - 1]["rank"]
+            # One call for both coarsenings: `letter_grade` is `star_rating` with
+            # the band relabelled, so a row cannot show a letter that disagrees
+            # with the star count printed beside it.
+            rating = letter_grade(item.score)
             ranked.append({
                 "label": item.label,
                 "source": item.source,
@@ -415,7 +494,8 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
                 "rank": rank,
                 "of": len(ordered),
                 "score": item.value,
-                "stars": star_rating(item.score)["stars"],
+                "stars": rating["stars"],
+                "letter": rating["letter"],
                 "n_components": len(item.components),
                 "components": list(item.components),
                 "tied_with": [],
@@ -668,6 +748,89 @@ def _no_stars(
 ) -> dict[str, Any]:
     """No rating, and why, in the shape a rating comes back in."""
     return _rating(None, None, None, denominator, registered, suppressed, reason)
+
+
+# ------------------------------------------------------------------
+# 2b. Letters
+# ------------------------------------------------------------------
+
+
+def letter_grade(score: Any) -> dict[str, Any]:
+    """
+    The composite score coarsened into a letter. One corpus at a time.
+
+    Takes what `star_rating` takes and refuses what it refuses: a
+    `composite_score` result (preferred, because it carries the component count
+    the score rested on) or a bare number on the 0-`SCORE_SCALE_MAX` scale. A
+    sequence raises TypeError, for the same reason — a letter is a restatement of
+    one number, and anything turning several into letters at once would be
+    `rank_corpora` wearing a different hat.
+
+    Why *this* cut, since a band structure is exactly the kind of hidden
+    judgement `scoring` spends its docstring refusing:
+
+    - **It is not a new cut at all.** `LETTER_BANDS` is built from `STAR_BANDS`
+      in one comprehension, so the edges are the star edges by construction and
+      cannot drift apart under a later edit. A letter table with edges of its own
+      would be a second coarsening of one number, and a page carrying both could
+      put one corpus in the fourth band by one and the third by the other. This
+      function is the star band relabelled and returns the star count alongside
+      the letter so the two can be checked against each other.
+    - **Five, equal width, on the score's own scale.** Inherited from the star
+      argument rather than re-argued: equal width because any other spacing
+      encodes a belief about where the interesting differences lie and nothing in
+      this data supports one, and round-numbered edges because an edge measured
+      off a group of researchers would make the letter a position in disguise.
+    - **Absolute, not relative.** This is the whole of the difference between a
+      letter here and a letter on a transcript. {top} means the score fell in the
+      top {width:g} points of a fixed scale printed beside it. It does not mean
+      the corpus beat anyone: no percentile, no quantile, no reference
+      population — `RANKING_EXCLUSIONS` says why there is none — and no ordering
+      of people. `LETTER_BASIS` states this in the returned value, so the
+      sentence travels with the letter rather than living only here.
+    - **{low} and not F.** The lowest band is where a corpus that scored lands,
+      and `star_rating` refuses a zero-star band so that the scale never reads as
+      a null verdict on such a corpus. F is the one letter that is read as a
+      verdict on a person rather than as a position on a scale; {low} carries the
+      same information without it.
+
+    Returns the `star_rating` payload with three fields re-pointed at the letter
+    table — `bands`, `scale_note`, `basis` — plus `letter`, the symbol, or None.
+    None whenever `stars` is None: a score that was refused, absent or suppressed
+    has no band, and the bottom of the scale is where a bad score goes, not where
+    a missing one goes. `unavailable` carries the reason in that case.
+
+    Raises ValueError on a non-finite value or one outside 0-{scale:g}, with the
+    same blind spot `star_rating` documents: a normalised component in [0, 1] is
+    a legal if dismal score and collects the lowest band in silence.
+    """
+    if isinstance(score, (str, bytes)) or (
+        not isinstance(score, Mapping) and isinstance(score, Sequence)
+    ):
+        raise TypeError(
+            f"letter_grade grades one score at a time, not a {type(score).__name__} of them. To "
+            "place several corpora against each other, call rank_corpora, which says in its "
+            "output what the position is a position among."
+        )
+
+    rating = star_rating(score)
+    stars = rating["stars"]
+    return {
+        **rating,
+        "letter": None if stars is None else LETTER_SYMBOLS[stars - 1],
+        "letters": list(LETTER_SYMBOLS),
+        "bands": [list(edge) for edge in LETTER_BANDS],
+        "scale_note": LETTER_SCALE_NOTE,
+        "basis": LETTER_BASIS,
+    }
+
+
+letter_grade.__doc__ = (letter_grade.__doc__ or "").format(
+    top=LETTER_SYMBOLS[-1],
+    low=LETTER_SYMBOLS[0],
+    width=STAR_BAND_WIDTH,
+    scale=SCORE_SCALE_MAX,
+)
 
 
 # ------------------------------------------------------------------

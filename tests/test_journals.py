@@ -615,6 +615,126 @@ check("a table with no matching journal at all is not the same as no table",
 
 
 # ============================================================
+# 4.9 是否预警 is three-valued, and stays three-valued end to end
+#
+# `_parse_bool` deliberately returns None for a blank cell rather than False:
+# nobody checked is not the same claim as not on the list. Until now the loader's
+# side of that was tested and nothing downstream was, so a join or a renderer
+# collapsing None into False would have passed. These three assertions close that
+# — the third state through the join, the disagreement branch, and the 未标注
+# cell the report prints for it.
+# ============================================================
+
+print("\n预警: the blank cell is a third value, not a quiet no")
+
+TRISTATE = load_journal_table(write_csv("tristate.csv", FULL_HEADER, [
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="官方版",
+              retrieved_on="2026-08-20", is_warning="是", warning_level="高"),
+    table_row(issn=NAN_ISSN, journal="Nanhai Journal of Applied Medicine",
+              source_edition="官方版", retrieved_on="2026-08-20", is_warning="否"),
+    table_row(issn=ORPHAN_ISSN, journal="Beihai Reports of Orphan Findings",
+              source_edition="官方版", retrieved_on="2026-08-20", is_warning=""),
+]))
+check("the loader keeps all three states",
+      [row["is_warning"] for row in TRISTATE["rows"]], [True, False, None])
+
+TRI_JOINED = join_journals(CORPUS, TRISTATE)
+tri_by_journal = {r["journal"]: r for r in TRI_JOINED["journals"]}
+check("...and all three survive the join unchanged",
+      [tri_by_journal[name]["entries"][0]["is_warning"] for name in
+       ("Journal of Hepatology", "Nanhai Journal of Applied Medicine",
+        "Beihai Reports of Orphan Findings")],
+      [True, False, None])
+# Two corpus spellings of one journal, so the flagged journal appears twice —
+# the abbreviation route matched "J Hepatol" to the same table row. Both are
+# listed, because the report counts papers per corpus journal string.
+check("only the true flag reaches warned_journals",
+      [w["journal"] for w in TRI_JOINED["warned_journals"]],
+      ["Journal of Hepatology", "J Hepatol"])
+check("a blank cell does not put a journal on the warned list",
+      any(w["journal"] == "Beihai Reports of Orphan Findings"
+          for w in TRI_JOINED["warned_journals"]), False)
+check("...and neither does an explicit 否",
+      any(w["journal"] == "Nanhai Journal of Applied Medicine"
+          for w in TRI_JOINED["warned_journals"]), False)
+
+# Two editions, one saying 是 and one saying 否. `_disagreement` lists it and
+# `warned_journals` still includes the journal — over-reporting on purpose, and
+# the report prints both facts. Nothing here picks a winner.
+SPLIT_FLAG = load_journal_table(write_csv("split_flag.csv", FULL_HEADER, [
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="官方版",
+              retrieved_on="2026-08-20", is_warning="是", warning_level="高"),
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="民间版",
+              retrieved_on="2026-08-20", is_warning="否"),
+]))
+SPLIT_JOINED = join_journals(CORPUS, SPLIT_FLAG)
+split_row = {r["journal"]: r for r in SPLIT_JOINED["journals"]}["Journal of Hepatology"]
+check("two editions disagreeing about 预警 is reported as a disagreement",
+      split_row["disagreement"].get("is_warning"), [False, True])
+check("...and the journal is still listed as warned, because over-reporting is the safer error",
+      [w["journal"] for w in SPLIT_JOINED["warned_journals"]],
+      ["Journal of Hepatology", "J Hepatol"])
+check("...with both editions named beside it",
+      SPLIT_JOINED["warned_journals"][0]["editions"], ["官方版", "民间版"])
+# A blank in one edition and a flag in the other is not a disagreement: one
+# edition made a claim and the other made none, which is not two claims.
+BLANK_SIDE = load_journal_table(write_csv("blank_side.csv", FULL_HEADER, [
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="官方版",
+              retrieved_on="2026-08-20", is_warning="是", warning_level="高"),
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="民间版",
+              retrieved_on="2026-08-20", is_warning=""),
+]))
+blank_row = {r["journal"]: r for r in join_journals(CORPUS, BLANK_SIDE)["journals"]}[
+    "Journal of Hepatology"]
+check("a blank beside a flag is not two claims, so it is not a disagreement",
+      "is_warning" in blank_row["disagreement"], False)
+# 预警等级 is deliberately not a disagreement field: two lists using different
+# words for the same severity is not the sources contradicting each other.
+LEVELS = load_journal_table(write_csv("levels.csv", FULL_HEADER, [
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="官方版",
+              retrieved_on="2026-08-20", is_warning="是", warning_level="高"),
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="新锐版",
+              retrieved_on="2026-08-20", is_warning="是", warning_level="中"),
+]))
+levels_joined = join_journals(CORPUS, LEVELS)
+check("two editions using different words for the level is not a disagreement",
+      "warning_level" in {r["journal"]: r for r in levels_joined["journals"]}
+      ["Journal of Hepatology"]["disagreement"], False)
+check("...and both levels are carried side by side instead",
+      levels_joined["warned_journals"][0]["levels"], ["中", "高"])
+
+# The rendered cell. 未标注 for a blank, 是/否 for the two real answers, and the
+# level in brackets — the one place a reader meets the third state.
+from check_your_advisor.profile.report import _journal_body  # noqa: E402
+
+TRI_LINES = _journal_body(TRI_JOINED, "")
+check_true("a true flag renders as 是 with its level in brackets",
+           any(line.startswith("| Journal of Hepatology") and "| 是 (高) |" in line
+               for line in TRI_LINES))
+check_true("an explicit 否 renders as 否",
+           any(line.startswith("| Nanhai Journal of Applied Medicine") and "| 否 |" in line
+               for line in TRI_LINES))
+check_true("a blank cell renders as 未标注, never as 否",
+           any(line.startswith("| Beihai Reports of Orphan Findings") and "| 未标注 |" in line
+               for line in TRI_LINES))
+# The "nothing was flagged" branch. It is the branch that has to work hardest,
+# because an empty warned list is exactly what a reader wants to read as good
+# news, and every cell behind it may simply be blank.
+NONE_FLAGGED = load_journal_table(write_csv("none_flagged.csv", FULL_HEADER, [
+    table_row(issn=HEP_ISSN, journal="Journal of Hepatology", source_edition="官方版",
+              retrieved_on="2026-08-20", is_warning=""),
+]))
+NONE_LINES = _journal_body(join_journals(CORPUS, NONE_FLAGGED), "")
+check_true("with nothing flagged the section says so",
+           any("- none in this table" in line for line in NONE_LINES))
+check_true("...and immediately says a blank 是否预警 cell is not a clean bill of health",
+           any("blank 是否预警 cell is not a clean bill of health" in line
+               for line in NONE_LINES))
+check_true("...and that it is a cell nobody filled in",
+           any("a cell nobody filled in" in line for line in NONE_LINES))
+
+
+# ============================================================
 # 5. What these numbers cannot mean
 # ============================================================
 

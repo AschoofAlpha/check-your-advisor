@@ -38,15 +38,20 @@ is ever placed above another. The ranks that now exist are among *corpora*, on
 the side-by-side page, and every one of them prints the count it was taken over.
 
 **Supplied by hand, or absent and said to be.** Journal Impact Factor, JCR
-quartile and CAS partition (`check_your_advisor.journals`), and the degree-thesis
+quartile and CAS partition (`check_your_advisor.journals`), the degree-thesis
 roster that carries graduates who published nothing
-(`check_your_advisor.theses`). Neither is shipped and neither is fetched: those
-are licensed products and subscription libraries, there is no crawler in this
+(`check_your_advisor.theses`), and the third-party statements about one advisor
+that somebody collected off public pages (`check_your_advisor.evaluations`).
+None of the three is shipped and none is fetched: those
+are licensed products, subscription libraries and sites that forbid automated
+collection, there is no crawler in this
 package, and there will not be one. Each module defines the schema, emits the
-worklist of what this corpus actually needs looked up, joins the file the user
-filled in, and prints the edition and the retrieval date beside every number.
-Report Sections 17 and 18 render them, and print the reason a table is absent
-rather than an empty cell.
+worklist of what this corpus actually needs looked up where one is possible,
+joins the file the user filled in, and prints the source and the retrieval date
+beside every number. Report Sections 17, 18 and 20 render them, and print the
+reason a table is absent rather than an empty cell. Section 20 computes nothing
+over its rows at all — no sentiment, no average, no rating, and no contribution
+to the composite score.
 
 Layout:
 
@@ -67,14 +72,18 @@ Layout:
            Markdown plus JSON rendering, and the side-by-side comparison.
 
   svg      Domain-free SVG primitives (docs/profile-visual-spec.md Section 3).
-  charts   The five figures, each a pure metric-dict-to-SVG-string function.
+  charts   Five of the seven figures, each a pure metric-dict-to-SVG-string
+           function, plus `figures_for_report`, which assembles all seven.
+  figures  The other two, C-POS and C-NET, split out only to hold `charts.py`
+           under 800 lines; same `svg.artifact` contract.
   html_report  The reading surface: one self-contained .html carrying the same
            numbers, the figures inline, and every caveat uncollapsed.
 
 `charts.figures_for_report` is deliberately not re-exported here. `cmd_profile`
 guards its import so that a drawing layer which will not load costs the reader
-five figures instead of the whole report; re-exporting it would run that import
-as a side effect of importing this package and make the guard unreachable.
+the seven figures instead of the whole report; re-exporting it would run that
+import as a side effect of importing this package and make the guard
+unreachable.
 Import it by module path: `from check_your_advisor.profile.charts import ...`.
 
 The package is named `profile` inside `check_your_advisor`, which shadows a
@@ -114,17 +123,21 @@ from .ranking import (
     star_rating,
 )
 from .report import (
+    MIN_OPENALEX_RECORD_SHARE,
     ORDER_BY_LABEL,
     ORDER_BY_SCORE,
     build_comparison,
     build_report,
     build_report_from_path,
     check_corpus_gates,
+    check_coverage_warnings,
+    check_identity_warnings,
     check_source_path,
     json_record,
     load_corpus,
     render_comparison_markdown,
     render_markdown,
+    resolve_openalex_record_share,
     resolve_score_weights,
     write_comparison,
     write_report,
@@ -149,6 +162,7 @@ __all__ = [
     "CAVEATS",
     "COMPONENT_NAMES",
     "DEFAULT_WEIGHTS",
+    "MIN_OPENALEX_RECORD_SHARE",
     "ORDER_BY_LABEL",
     "ORDER_BY_SCORE",
     "RANKING_EXCLUSIONS",
@@ -167,6 +181,8 @@ __all__ = [
     "build_report_from_path",
     "caveat",
     "check_corpus_gates",
+    "check_coverage_warnings",
+    "check_identity_warnings",
     "check_source_path",
     "citation_metrics",
     "comparative_statement",
@@ -188,6 +204,7 @@ __all__ = [
     "render_comparison_markdown",
     "render_html",
     "render_markdown",
+    "resolve_openalex_record_share",
     "resolve_pi",
     "resolve_score_weights",
     "roster_turnover",

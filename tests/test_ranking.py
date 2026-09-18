@@ -16,6 +16,11 @@ expected to work, and each one is tested for the specific way it could go wrong:
     and printed with the result. The failure mode is a band table that drifts
     away from the constant it claims to be derived from, or a zero-star band
     that reads as a verdict on somebody who did score.
+  - **Letters.** The same five bands spelled with a letter instead of a star,
+    derived from `STAR_BANDS` rather than cut again, on the user's instruction.
+    The failure mode is a second cut: a letter table with edges of its own, which
+    would put one score in the fourth band by one coarsening and the third by the
+    other and leave a reader to guess which of the two the page meant.
   - **Direction.** "A scores higher than B", refused outright when the two
     numbers were not built the same way. The failure mode is the polite version:
     printing the difference anyway, under a heading that says the two are not
@@ -26,12 +31,10 @@ And the line that did not move, asserted rather than assumed:
 
   - no percentile and no quantile, because there is no reference population;
   - no trend and no fitted slope, unchanged from round one;
-  - **no letter grade.** Stars are produced and letters are not. That is one
-    number coarsened two ways and split deliberately, on the user's instruction,
-    and `RANKING_EXCLUSIONS` records the split so that a later reader does not
-    tidy it away by unifying them. It is the only prohibition round two adds, so
-    it is checked here by walking the whole returned structure, not by grepping
-    prose.
+  - no ordering of people anywhere. A rank is a position among the corpora on one
+    page and says so; a letter is a position on a fixed scale and is not a
+    position among anybody at all. Both are checked here by walking the whole
+    returned structure, not by grepping prose.
 
 Pure computation: no file access, no network, standard library only.
 
@@ -49,6 +52,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 from check_your_advisor.profile import ranking  # noqa: E402
 from check_your_advisor.profile.ranking import (  # noqa: E402
     COMPARISON_CAVEAT,
+    LETTER_BANDS,
+    LETTER_BASIS,
+    LETTER_SCALE_NOTE,
+    LETTER_SYMBOLS,
     MIN_RANKED_CORPORA,
     RANKING_EXCLUSIONS,
     RANK_METHOD,
@@ -61,6 +68,7 @@ from check_your_advisor.profile.ranking import (  # noqa: E402
     STAR_SCALE_NOTE,
     TIE_DECIMALS,
     comparative_statement,
+    letter_grade,
     rank_corpora,
     star_rating,
 )
@@ -151,9 +159,21 @@ def entry(label: str, lead: int, source: str = "", **weights) -> dict:
             "gate": None, "score": score_of(lead, **weights)}
 
 
-def refused_entry(label: str, gate_id: str = "G1", name: str = "truncation") -> dict:
+def refused_entry(label: str, gate_id: str = "G2", name: str = "identity fallback") -> dict:
     return {"label": label, "source": f"dir/{label}", "refused": True,
             "gate": {"id": gate_id, "name": name}, "score": None}
+
+
+def warned_entry(label: str, lead: int = 10, warning_id: str = "G2",
+                 name: str = "identity fallback") -> dict:
+    """A corpus whose report was built but whose identity is unconfirmed.
+
+    G2 and G3 stopped refusing the report. What they did not stop doing is
+    withholding a position: a rank is a claim about one person, and this corpus
+    may hold several. The score is in the row and the row is on the page.
+    """
+    return {"label": label, "source": f"dir/{label}", "refused": False, "gate": None,
+            "warnings": [{"id": warning_id, "name": name}], "score": score_of(lead)}
 
 
 def suppressed_entry(label: str) -> dict:
@@ -211,6 +231,14 @@ check_true("...and it says a rank across fields is meaningless even when correct
 check("each ranked row carries the star band of its own score",
       [row["stars"] for row in result["ranked"]],
       [star_rating(score_of(k))["stars"] for k in (20, 10, 0)])
+check("...and the same band spelled as a letter",
+      [row["letter"] for row in result["ranked"]],
+      [letter_grade(score_of(k))["letter"] for k in (20, 10, 0)])
+# One cut, two spellings. A row whose letter disagreed with its star count would
+# be two coarsenings of one number rather than one coarsening printed twice.
+check("the letter on a row is the star band of that same row, never a second cut",
+      [row["letter"] for row in result["ranked"]],
+      [LETTER_SYMBOLS[row["stars"] - 1] for row in result["ranked"]])
 
 
 # --- ties ---------------------------------------------------------------
@@ -261,7 +289,7 @@ print("\nwhat is not ranked, and why not")
 
 mixed = rank_corpora([
     entry("Scored one", 20), entry("Scored two", 0),
-    refused_entry("Refused corpus", "G1", "truncation"),
+    refused_entry("Refused corpus", "G2", "identity fallback"),
     suppressed_entry("Suppressed corpus"),
 ])
 check("only the corpora with a score take positions", mixed["n_ranked"], 2)
@@ -278,10 +306,10 @@ check("...and is never scored as zero",
 
 by_label = {row["label"]: row for row in mixed["unranked"]}
 check_true("a refused corpus names its gate in the reason",
-           "gate G1" in by_label["Refused corpus"]["reason"]
-           and "truncation" in by_label["Refused corpus"]["reason"])
+           "gate G2" in by_label["Refused corpus"]["reason"]
+           and "identity fallback" in by_label["Refused corpus"]["reason"])
 check("...and carries the gate itself for a renderer",
-      by_label["Refused corpus"]["gate"], {"id": "G1", "name": "truncation"})
+      by_label["Refused corpus"]["gate"], {"id": "G2", "name": "identity fallback"})
 check_true("a suppressed score says how many components it had and the floor",
            "suppressed at 1 scored component(s), floor 3"
            in by_label["Suppressed corpus"]["reason"])
@@ -291,6 +319,44 @@ check("...and its component count survives the suppression",
       by_label["Suppressed corpus"]["n_components"], 1)
 check("a refused corpus has no components to report",
       by_label["Refused corpus"]["n_components"], 0)
+
+# The identity warnings that used to be gates. Rendering the report was a
+# decision about the report; it was not a decision to let a corpus that may hold
+# several people take a position beside corpora that hold one.
+warned = rank_corpora([
+    entry("Clean one", 20), entry("Clean two", 4), warned_entry("Unverified corpus"),
+])
+check("a warned corpus takes no position", warned["n_ranked"], 2)
+check("...but keeps its row", warned["n_unranked"], 1)
+check("...over a denominator that still counts it", warned["denominator"], 3)
+_warned_row = warned["unranked"][0]
+check("...holding no rank at all", _warned_row["rank"], None)
+check("...and never scored as zero", _warned_row["score"], None)
+check_true("...with a reason naming the warning",
+           "G2 (identity fallback)" in _warned_row["reason"])
+check_true("...and saying why a rank in particular is withheld",
+           "a rank compares corpora that are each complete and each about one person"
+           in _warned_row["reason"])
+# The reason names the warning and stops there. It used to assert "so it may
+# describe more than one researcher", which is what G2 and G3 mean and is not
+# what G1 means — a harvest that retrieved 500 of 900 records for one person is
+# still one person, and that row said otherwise.
+check("...without asserting the corpus holds several people",
+      "may describe more than one researcher" in _warned_row["reason"], False)
+check("...while its component count survives, because the score was computed",
+      _warned_row["n_components"] > 0, True)
+check("both warnings are named when both fired",
+      "G3 (weak identity config)" in rank_corpora([
+          entry("A", 20), entry("B", 4),
+          {"label": "Both", "source": "dir/Both", "refused": False, "gate": None,
+           "score": score_of(10),
+           "warnings": [{"id": "G2", "name": "identity fallback"},
+                        {"id": "G3", "name": "weak identity config"}]},
+      ])["unranked"][0]["reason"], True)
+check("an empty warnings list is not a warning",
+      rank_corpora([entry("A", 20),
+                    {"label": "B", "source": "dir/B", "refused": False, "gate": None,
+                     "warnings": [], "score": score_of(4)}])["n_ranked"], 2)
 
 
 # --- the floor ----------------------------------------------------------
@@ -523,6 +589,132 @@ check_true("...and at composite_score for the mapping case",
 
 
 # ============================================================
+# 2b. Letters — the same bands, spelled differently
+# ============================================================
+#
+# Round one refused letters while producing stars, and recorded the split as
+# deliberate. The user has reversed that, so the thing to assert is no longer
+# absence but *identity*: a letter must be the star band relabelled, because a
+# letter table with edges of its own would be a second, undeclared cut of the
+# same number, and the page would carry two coarsenings that can disagree.
+
+print("\nletter anchors")
+
+check("one letter per star band, no more and no fewer", len(LETTER_BANDS), len(STAR_BANDS))
+check("the letter bands sit on the star band edges, so the two cannot drift apart",
+      [lower for lower, _ in LETTER_BANDS], [lower for lower, _ in STAR_BANDS])
+check("the symbols are a declared constant, indexed by the star count",
+      LETTER_SYMBOLS, ("E", "D", "C", "B", "A"))
+check("highest band first, like the star table",
+      [letter for _, letter in LETTER_BANDS], ["A", "B", "C", "D", "E"])
+check("the band table is derived from the star table, not typed out",
+      LETTER_BANDS,
+      tuple((lower, LETTER_SYMBOLS[stars - 1]) for lower, stars in STAR_BANDS))
+check("every band is the same width",
+      {round(LETTER_BANDS[i - 1][0] - LETTER_BANDS[i][0], 6)
+       for i in range(1, len(LETTER_BANDS))},
+      {STAR_BAND_WIDTH})
+check("...and the lowest starts at zero, so a corpus that scored always lands somewhere",
+      min(lower for lower, _ in LETTER_BANDS), 0.0)
+# The star scale has no zero-star band for the same reason. "F" is the one letter
+# that is read as a verdict rather than as a position on a scale, and the lowest
+# band is where a corpus that did score lands.
+check("there is no F, so the lowest band is not a verdict on a corpus that scored",
+      "F" in {letter for _, letter in LETTER_BANDS}, False)
+
+# An anchor that is not printed is an anchor nobody can disagree with.
+check("the note spells the edges out in full",
+      LETTER_SCALE_NOTE, "A = 80-100; B = 60-80; C = 40-60; D = 20-40; E = 0-20")
+check_true("the basis carries the note, so the argument travels with the grade",
+           LETTER_SCALE_NOTE in LETTER_BASIS)
+check_true("...and states that no edge was measured off a group of researchers",
+           "not cut points measured off any group of researchers" in LETTER_BASIS)
+check_true("...and that a letter is therefore not a percentile",
+           "not a percentile" in LETTER_BASIS)
+check_true("...and that it orders no person",
+           "orders no person" in LETTER_BASIS)
+
+print("\nletter boundaries")
+
+for value, letter in ((0.0, "E"), (19.9, "E"), (20.0, "D"), (39.9, "D"), (40.0, "C"),
+                      (60.0, "B"), (79.9, "B"), (80.0, "A"), (100.0, "A")):
+    check(f"{value} falls in band {letter}", letter_grade(value)["letter"], letter)
+check("a band is closed at the bottom and open at the top",
+      (letter_grade(20.0)["band"], letter_grade(19.9)["band"]), ([20.0, 40.0], [0.0, 20.0]))
+check("the top band is closed at the scale maximum", letter_grade(100.0)["band"], [80.0, 100.0])
+check_true("...and says so, so 100 is not read as falling off the end",
+           letter_grade(100.0)["band_closed_at_top"])
+check("the band is decided on the score as printed, like every other comparison",
+      letter_grade(19.96)["letter"], "D")
+# The identity the whole design rests on, checked across the scale rather than at
+# one point: same input, same band, two spellings.
+check("a letter is the star band relabelled, at every band",
+      [letter_grade(v)["letter"] for v in (0.0, 25.0, 50.0, 75.0, 100.0)],
+      [LETTER_SYMBOLS[star_rating(v)["stars"] - 1]
+       for v in (0.0, 25.0, 50.0, 75.0, 100.0)])
+check("...and the star count it came from travels with it, so the two can be checked",
+      [letter_grade(v)["stars"] for v in (0.0, 50.0, 100.0)],
+      [star_rating(v)["stars"] for v in (0.0, 50.0, 100.0)])
+
+print("\nwhat a grade carries with it")
+
+graded = letter_grade(score_of(20))
+check("a composite_score result grades to the same number it printed",
+      graded["score"], expected(20))
+check("...and reports the components that score rested on",
+      graded["denominator"], score_of(20)["denominator"])
+check("the full band table comes back with every grade",
+      graded["bands"], [list(edge) for edge in LETTER_BANDS])
+check("...and the band width", graded["band_width"], STAR_BAND_WIDTH)
+check("...and the basis verbatim", graded["basis"], LETTER_BASIS)
+check("...and the caveat", graded["caveat"], COMPARISON_CAVEAT)
+check("a bare float cannot say what it was computed over",
+      letter_grade(50.0)["denominator"], None)
+
+print("\nno grade, and the shape it comes back in")
+
+ungraded = letter_grade(None)
+check("no score means no letter", ungraded["letter"], None)
+# Same convention as `stars=None`: a missing score is not the bottom of the
+# scale, and E is where a corpus that scored badly lands, not where a corpus
+# nobody could score lands.
+check("...not the lowest band, which would read as a verdict on missing data",
+      ungraded["letter"] is None, True)
+check_true("...with the reason attached",
+           "no composite score was supplied" in ungraded["unavailable"])
+check("a grade that exists and one that does not carry the same keys",
+      sorted(ungraded), sorted(graded))
+check("...including the band table", ungraded["bands"], graded["bands"])
+
+held_letter = letter_grade(composite_score({"s3a": s3a(10)}))
+check("a suppressed score is not coarsened into a letter", held_letter["letter"], None)
+check_true("...and the suppression is reported as suppression", held_letter["suppressed"])
+check_true("...naming the count and the floor",
+           "suppressed at 1 scored component(s), floor 3" in held_letter["unavailable"])
+check("...while the component count survives", held_letter["denominator"], 1)
+check_false("a graded score is not flagged suppressed", graded["suppressed"])
+
+print("\nwhat letter_grade refuses")
+
+check("a score above the scale raises", raises(letter_grade, 100.1), "ValueError")
+check("a negative score raises", raises(letter_grade, -0.1), "ValueError")
+check("a NaN raises", raises(letter_grade, float("nan")), "ValueError")
+check("an infinity raises", raises(letter_grade, float("inf")), "ValueError")
+check("a value that is not a number at all raises", raises(letter_grade, object()), "ValueError")
+# Same split as star_rating: a string is a Sequence, so it is turned away by the
+# sequence guard rather than by the numeric one.
+check("a string is refused as a sequence, not parsed as a number",
+      raises(letter_grade, "excellent"), "TypeError")
+check("a list of scores raises", raises(letter_grade, [50.0, 60.0]), "TypeError")
+check("a tuple of scores raises", raises(letter_grade, (50.0, 60.0)), "TypeError")
+check("an arbitrary mapping raises", raises(letter_grade, {"score": 50.0}), "TypeError")
+check_true("...and the message names the function that was called",
+           "letter_grade" in message(letter_grade, [50.0, 60.0]))
+check_true("...and points at the function that does take a set",
+           "rank_corpora" in message(letter_grade, [50.0, 60.0]))
+
+
+# ============================================================
 # 3. Direction — and the refusal to state one
 # ============================================================
 
@@ -645,6 +837,8 @@ PAYLOADS = {
                                   entry("Charlie", 10), refused_entry("Delta")]),
     "star_rating": star_rating(score_of(20)),
     "star_rating (none)": star_rating(None),
+    "letter_grade": letter_grade(score_of(20)),
+    "letter_grade (none)": letter_grade(None),
     "comparative_statement": comparative_statement(entry("Alpha", 20), entry("Bravo", 0)),
     "comparative_statement (refused)": comparative_statement(entry("Six", 10), four),
 }
@@ -664,38 +858,42 @@ def walk(node, path=""):
 # Keys, not prose. `RANKING_EXCLUSIONS` and the caveats have to name these
 # quantities in order to refuse them, so a bare-word scan would read the refusal
 # as the offence. A field named `percentile` is the offence.
-BANNED_KEYS = ("percentile", "quantile", "trend", "slope", "grade", "letter")
+#
+# "grade" and "letter" came off this list when the letter band was added. They
+# were here to assert an absence; the absence is gone, and a ban that outlives
+# the feature it banned passes for the wrong reason.
+BANNED_KEYS = ("percentile", "quantile", "trend", "slope")
 for name, payload in PAYLOADS.items():
     offending = sorted({key for _, key, _ in walk(payload)
                         if any(word in key.lower() for word in BANNED_KEYS)})
-    check(f"{name} exposes no percentile, quantile, trend, slope or grade field",
+    check(f"{name} exposes no percentile, quantile, trend or slope field",
           offending, [])
 
 check("the module exports no helper for any of them",
       [n for n in dir(ranking)
        if not n.startswith("_")
-       and any(w in n.lower() for w in ("percentile", "quantile", "trend", "slope", "grade"))],
+       and any(w in n.lower() for w in ("percentile", "quantile", "trend", "slope"))],
       [])
 
-# 字母等级 — the one prohibition round two adds, checked as a value rather than
-# as a word, for the same reason the key scan above is a key scan.
-LETTER_GRADE = re.compile(
-    r"(?i:grade|tier|band|等级|评级)\s*\d*\s*[:：=]\s*[\"'“]?[A-DF][+\-]?(?![A-Za-z])"
-    r"|(?<![A-Za-z])[A-DF][+\-]?\s*(?:级|档)(?![A-Za-z])"
-    r"|(?<![A-Za-z])A\s*[/、,]\s*B\s*[/、,]\s*C(?![A-Za-z])"
-)
-for offending in ("grade: B", "评级：A+", "band 3 = C-", "the scale is A/B/C"):
-    check(f"the letter-grade guard catches {offending!r}",
-          bool(LETTER_GRADE.search(offending)), True)
-for name, payload in PAYLOADS.items():
-    strings = [value for _, _, value in walk(payload) if isinstance(value, str)]
-    hits = sorted({hit for text in strings for hit in LETTER_GRADE.findall(text)})
-    check(f"{name} emits no value as a letter grade", hits, [])
-# The three star fields are the reason the letter ban has to be asserted rather
-# than assumed: the coarsening exists, it just is not spelled with letters.
-check("stars are produced, which is what makes the letter ban a real distinction",
+# 字母等第 — produced now, and the assertion is that it is the star band relabelled
+# rather than a second cut. Both coarsenings are walked out of the same payloads
+# above, so a letter that disagreed with its own star count would fail here.
+for name in ("rank_corpora", "letter_grade"):
+    rows = (PAYLOADS[name]["ranked"] if name == "rank_corpora" else [PAYLOADS[name]])
+    check(f"{name}: every letter is the letter of its own star band",
+          [row["letter"] for row in rows],
+          [LETTER_SYMBOLS[row["stars"] - 1] for row in rows])
+check("tied corpora take one letter, because they took one score",
+      len({row["letter"] for row in PAYLOADS["rank_corpora"]["ranked"]
+           if row["rank"] == 2}), 1)
+# Stars did not go away when letters arrived. One number, one cut, two spellings,
+# and both are printed so neither can be quietly re-cut.
+check("stars are still produced beside the letters",
       (PAYLOADS["star_rating"]["stars"], PAYLOADS["star_rating"]["max_stars"]),
       (star_rating(expected(20))["stars"], STAR_MAX))
+check("...and a payload with no score has neither, rather than the bottom of each",
+      (PAYLOADS["star_rating (none)"]["stars"], PAYLOADS["letter_grade (none)"]["letter"]),
+      (None, None))
 
 print("\nthe exclusions register")
 
@@ -703,17 +901,27 @@ check("the register keeps two lists, for two different reasons",
       sorted(RANKING_EXCLUSIONS), ["not_computable_here", "refused_by_design"])
 refused_by_design = dict(RANKING_EXCLUSIONS["refused_by_design"])
 not_computable = dict(RANKING_EXCLUSIONS["not_computable_here"])
-check("letter tiers are refused by decision, not for want of data",
-      "Letter tiers" in refused_by_design, True)
-check_true("...and the register says the split from stars was deliberate",
-           "deliberate split" in refused_by_design["Letter tiers"])
-check_true("...and warns the next reader not to unify them",
-           "reverse a decision they were not party to" in refused_by_design["Letter tiers"])
-check("trends and fitted slopes are refused by decision too",
-      "Trends, fitted slopes, year-over-year change" in refused_by_design, True)
-check_true("...unchanged from round one",
-           "unchanged from round one"
-           in refused_by_design["Trends, fitted slopes, year-over-year change"])
+# The register said letter tiers were refused by decision. That decision was
+# reversed by the user, letters are produced, and the entry is gone — a register
+# that still refused a feature the module emits would be the exact drift it
+# exists to prevent, and deleting the entry is how it stays true.
+check("nothing in the register still refuses letters",
+      [name for name in refused_by_design if "etter" in name], [])
+check("...and nothing refuses tiers under another word either",
+      [name for name in refused_by_design if "ier" in name], [])
+# Round four narrowed this entry rather than deleting it. `profile/trends.py`
+# now fits a slope for Section 9, so an entry reading "trends are refused" flat
+# would be false; what remains true, and is what this register is for, is that
+# nothing *here* reads one. The heading carries that scope now, and these
+# assertions hold it to the scope rather than to the old flat wording.
+_trend_entry = [name for name in refused_by_design if name.startswith("Trends, fitted slopes")]
+check("the register still speaks to trends", len(_trend_entry), 1)
+check_true("...scoped to what a rank reads, not to their existence",
+           "as anything a rank reads" in _trend_entry[0])
+check_true("...keeping round one's objection verbatim",
+           "unchanged from round one" in refused_by_design[_trend_entry[0]])
+check_true("...and saying plainly that no rank moves on a direction",
+           "No corpus outranks another for having risen" in refused_by_design[_trend_entry[0]])
 # The distinction the register exists to keep: a percentile is not refused here,
 # it is uncomputable here, and a better data source would change that answer
 # where it would not change the two above.
