@@ -1,9 +1,12 @@
 """
 The static figure set for the advisor profile report (docs/profile-visual-spec.md).
 
-Five figures, one per section that earns one: C-GANTT (2), C-LAG (4), C-SPAN (5),
-C-YEAR (9), C-TEAM (10). Everything else stays text or a table; the refusals and their
-reasons are recorded in Section 6 of the visual spec.
+The report carries seven figures, one per section that earns one. Five are drawn
+here — C-GANTT (2), C-LAG (4), C-SPAN (5), C-YEAR (9), C-TEAM (10) — and the other
+two, C-POS (7) and C-NET (19), are in the sibling `figures` module only to hold this
+file under 800 lines. `figures_for_report` below assembles all seven. Everything else
+stays text or a table; the refusals and their reasons are recorded in Section 6 of the
+visual spec.
 
 Every function is pure — metric dict in, figure dict out — and every figure is a
 hand-emitted SVG string. Suppression is a rendering decision that already lives in
@@ -34,6 +37,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any
 
+from .figures import byline_year_chart, coauthor_network_chart
 from .metrics import MIN_N_AGGREGATE, MIN_N_SUBSET_MEDIAN
 from .report import STRATUM_LABEL
 from .svg import (
@@ -45,6 +49,7 @@ from .svg import (
     Bands,
     aggregate,
     arrow,
+    artifact,
     circle,
     document,
     fmt,
@@ -56,6 +61,7 @@ from .svg import (
     plate,
     positions,
     preamble,
+    prose_artifact,
     rect,
     stack,
     tag,
@@ -77,16 +83,20 @@ COLUMN_BUDGET = 300.0
 LARGE_TEAM_MIN_AUTHORS = 20  # reported as an annotation, never used as a cut-off
 HYPERAUTHORSHIP_MIN_AUTHORS = 50
 
-CHART_IDS = ("C-GANTT", "C-LAG", "C-SPAN", "C-YEAR", "C-TEAM")
+CHART_IDS = ("C-GANTT", "C-LAG", "C-SPAN", "C-YEAR", "C-TEAM", "C-POS", "C-NET")
 
 # Acceptance item 23, held here so one figure cannot be paired with two caveat sets in
 # two places. The HTML builder reads the text itself from `report["caveats"]`, verbatim.
+# C-POS and C-NET carry none: Section 7's qualifications are conditional on `measured`
+# and Section 19's are prose, so pinning one would print a wording twice.
 FIGURE_CAVEATS: dict[str, tuple[str, ...]] = {
     "C-GANTT": ("CAV-02", "CAV-03", "CAV-09"),
     "C-LAG": ("CAV-06", "CAV-07", "CAV-08"),
     "C-SPAN": ("CAV-09", "CAV-10", "CAV-11"),
     "C-YEAR": ("CAV-17", "CAV-18"),
     "C-TEAM": ("CAV-19",),
+    "C-POS": (),
+    "C-NET": (),
 }
 
 # Byte-identical to `report._time_to_lead_body` (acceptance item 18): the figure and the
@@ -95,10 +105,7 @@ NO_LEAD_SENTENCE = "no person in this corpus holds a first-author slot"
 NO_COHORT_SENTENCE = "no person in this corpus appears more than once and holds no senior slot"
 
 
-def _figure(chart_id: str, *, svg: str, caption: str, desc: str,
-            rows: list[dict[str, Any]], drawn: bool) -> dict[str, Any]:
-    return {"id": chart_id, "svg": svg, "caption": caption, "desc": desc,
-            "rows": rows, "drawn": drawn}
+_figure = artifact
 
 
 def _records(count: int) -> str:
@@ -107,13 +114,7 @@ def _records(count: int) -> str:
     return f"{count} record" + ("" if count == 1 else "s")
 
 
-def _prose(chart_id: str, sentence: str, rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
-    """A degenerate figure is replaced by a stated sentence, never by an empty axis.
-
-    An axis with tick labels and no marks is the worst output available here: it reads
-    as a measured zero. The caller renders `caption` as prose instead.
-    """
-    return _figure(chart_id, svg="", caption=sentence, desc=sentence, rows=rows or [], drawn=False)
+_prose = prose_artifact
 
 
 # --- C-GANTT: person activity timeline (report Section 2) --------------------------
@@ -788,4 +789,8 @@ def figures_for_report(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
         "C-SPAN": activity_span_chart(computed.get("s5") or {}),
         "C-YEAR": records_per_year_chart(computed.get("s9") or {}, prov),
         "C-TEAM": team_size_chart(computed.get("s10") or {}, prov),
+        # In `figures.py` only because this file is held under 800 lines
+        # (acceptance item 35); same artifact contract, from `svg.artifact`.
+        "C-POS": byline_year_chart(computed.get("s7") or {}, computed.get("s9") or {}),
+        "C-NET": coauthor_network_chart(computed.get("s19") or {}, prov),
     }

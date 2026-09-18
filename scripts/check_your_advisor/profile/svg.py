@@ -269,6 +269,30 @@ def preamble(title: str, sub_lines: list[str]) -> list[str]:
     ]
 
 
+def artifact(chart_id: str, *, svg: str, caption: str, desc: str,
+             rows: list[dict[str, Any]], drawn: bool) -> dict[str, Any]:
+    """The figure artifact `html_report._render_figure` reads.
+
+    Lives here rather than in one of the two chart modules because both emit it
+    and neither owns it. A second copy of these five keys is how one module ends
+    up spelling `drawn` as `rendered` and losing every figure it produces to a
+    silent `.get()` default.
+    """
+    return {"id": chart_id, "svg": svg, "caption": caption, "desc": desc,
+            "rows": rows, "drawn": drawn}
+
+
+def prose_artifact(chart_id: str, sentence: str,
+                   rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """A degenerate figure replaced by a stated sentence, never by an empty axis.
+
+    An axis with tick labels and no marks is the worst output available here: it
+    reads as a measured zero. The caller renders `caption` as prose instead.
+    """
+    return artifact(chart_id, svg="", caption=sentence, desc=sentence,
+                    rows=rows or [], drawn=False)
+
+
 def document(chart_id: str, width: float, height: float, title: str, desc: str, body: str) -> str:
     """`role="img"` plus `aria-labelledby` pointing at an in-SVG `<title>` and `<desc>`.
 

@@ -264,7 +264,21 @@ EMPTY = {
     "C-TEAM": charts.team_size_chart(EMPTY_S10, {}),
 }
 
-check("one function per chart in the spec", sorted(DRAWN), sorted(charts.CHART_IDS))
+# The id list is longer than this file's function list on purpose. C-POS and
+# C-NET live in `profile.figures` because `charts.py` is held under 800 lines
+# (acceptance item 35), not because they are a different kind of artifact — they
+# use the same `svg.artifact` contract and are exercised in test_figures.py. What
+# is asserted here is that the split is exactly that and nothing has gone
+# missing: every id is drawn by one module or the other, and neither claims one
+# the other also claims.
+FROM_FIGURES = ("C-POS", "C-NET")
+check("one function in this module per chart it owns",
+      sorted(DRAWN), sorted(set(charts.CHART_IDS) - set(FROM_FIGURES)))
+check("...and the id list is those plus the two in profile.figures",
+      sorted(charts.CHART_IDS), sorted(set(DRAWN) | set(FROM_FIGURES)))
+check("the sibling module supplies exactly those two, and by name",
+      [name for name in ("byline_year_chart", "coauthor_network_chart")
+       if not callable(getattr(charts, name, None))], [])
 for chart_id, figure in DRAWN.items():
     svg = svg_of(figure)
     check_true(f"{chart_id} draws", figure["drawn"])
@@ -308,6 +322,12 @@ for chart_id, figure in {**DRAWN, **SUPPRESSED}.items():
 check("two runs over one corpus emit byte-identical svg",
       charts.person_timeline_chart(S2, S5, S9, PROVENANCE)["svg"], DRAWN["C-GANTT"]["svg"])
 check("every figure is paired with its caveat ids", sorted(charts.FIGURE_CAVEATS), sorted(charts.CHART_IDS))
+# Two carry none, and that is a decision rather than an oversight: Section 7's
+# qualifications are conditional on `measured` and Section 19's are prose rather
+# than register entries, so pinning one to a figure would print a wording its own
+# section does not.
+check("C-POS and C-NET carry no caveat id, and the empty tuple is explicit",
+      [charts.FIGURE_CAVEATS[key] for key in FROM_FIGURES], [(), ()])
 check("C-GANTT carries the three caveats the spec assigns it",
       charts.FIGURE_CAVEATS["C-GANTT"], ("CAV-02", "CAV-03", "CAV-09"))
 check("C-LAG carries the three caveats the spec assigns it",
