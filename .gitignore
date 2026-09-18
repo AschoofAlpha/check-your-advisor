@@ -26,10 +26,27 @@ paper_cache.db
 pdfs/
 *.log
 
-# The two tables a user fills in by hand. They are that user's work and may
+# The two dated files the network verbs write, added when those verbs were.
+# Same reason as the block above: each names real journals and real papers from
+# somebody's corpus, and `impact_reference_*.json` additionally carries a
+# per-paper position that only means anything next to the corpus it came from.
+journal_risk_*.json
+impact_reference_*.json
+
+# The four tables a user fills in by hand. They are that user's work and may
 # carry licensed figures typed from a vendor page.
+#
+# `evaluations*.csv` is the one to be most careful with: it holds third-party
+# statements about a named individual, collected by hand from public pages. It
+# is the user's research notes, it is about someone who did not publish it here,
+# and it has no business in a public repository under any circumstances.
 journal_table*.csv
 thesis_roster*.csv
+theses*.csv
+evaluations*.csv
+evaluation_table*.csv
+chinese_records*.csv
+cnki*.csv
 
 # Local config: may carry an NCBI API key and an email address.
 config.json
