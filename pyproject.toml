@@ -36,12 +36,21 @@ classifiers = [
     "Topic :: Text Processing :: Indexing",
 ]
 
-# No `dependencies` key, and that is the point rather than an omission. Every
-# import in this package is from the standard library, and the test suite proves
+# No `dependencies` key, and that is the point rather than an omission. Not one
+# module in this package imports a third party at module scope, so importing it
+# never needs anything installed. Six non-stdlib imports exist at all, every one
+# inside a function body, and they name only the two optional extras below:
+# `openpyxl` in cli.py and export.py, `fitz` in pdf_utils.py. Four of the six sit
+# directly under `except ImportError`; the two in `save_to_excel` do not, because
+# both of its callers probe the same import under one before calling it.
+# The test suite proves the claim rather than restating
 # it: `python tests/run_all.py --block-third-party` installs an import hook that
 # makes requests, urllib3, pandas, numpy, matplotlib, fitz and openpyxl
-# unimportable, and 1922 of 1925 assertions still pass. Adding a dependency here
-# would make that suite a claim nobody checks.
+# unimportable, and 4902 of 4905 assertions still pass (35 files, measured
+# 2026-09-17). Adding a dependency here would make that suite a claim nobody
+# checks. Both numbers are re-measured on every run and the run fails if this
+# comment has drifted; tests/test_declared_counts.py fails if the sentence above
+# them has.
 
 [project.optional-dependencies]
 # Both are genuinely optional and both have a tested fallback path. PyMuPDF is

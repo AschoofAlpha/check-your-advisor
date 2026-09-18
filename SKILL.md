@@ -1,6 +1,6 @@
 ---
 name: check-your-advisor
-description: 查导师：把 PubMed 里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。不打分给结论，只给证据。Report what a principal investigator's publication record shows about being their student, from PubMed. Answers who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern. Every count is printed with its denominator. Citation counts, an h-index and one composite score out of 100 are computed and written to disk, the score under a flat default weight table the report prints verbatim and the user can edit. Several corpora can be laid side by side and are ranked there by that score, each with a star band and, for adjacent pairs, one sentence saying which scored higher — every rank printed with the number of corpora it was taken among. It still produces no percentile or quantile position, for want of any reference population to compute one against, no letter grade, and no fitted trend; and it never orders people, only corpora. Impact factor, JCR quartile, CAS partition and the list of this advisor's graduates are joined from CSV tables the user fills in by hand and passes in — the schemas, the worklist and the join are here, the scraping of a subscription database is not. Seven verbs — `harvest` collects one named researcher's papers and separates them from same-name authors; `cite` fetches citation counts into their own dated file; `journal-worklist` writes out the journals this corpus actually uses so they can be looked up; `profile` turns that corpus into the report; `compare` puts several corpora on one page; `download` re-runs only the PDF stage over an existing corpus; `clean-cache` drops expired failed downloads from the cache.
+description: 查导师：把 PubMed 里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。不打分给结论，只给证据。Report what a principal investigator's publication record shows about being their student, from PubMed. Answers who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern. Every count is printed with its denominator. Citation counts, an h-index and one composite score out of 100 are computed and written to disk, the score under a flat default weight table the report prints verbatim and the user can edit. Several corpora can be laid side by side and are ranked there by that score, each with a star band and, for adjacent pairs, one sentence saying which scored higher — every rank printed with the number of corpora it was taken among. A letter band sits beside the star band on the compare page, both being the same score coarsened on the same boundaries. Section 9 fits a slope over the yearly counts and prints the confidence interval and the number of points in the same sentence, refusing to fit at all below four points. Section 2 ranks the people it names by first-author slots, as a second table beside the roster rather than by reordering it, with the size of the roster printed beside the ranks. With `cite --percentile` it also asks OpenAlex where each citation count falls among every work sharing that paper's topic and publication year, and prints the position with the size of that cell beside it; papers it cannot place carry one of seven named reasons and never a low position. It still produces no position among the corpora a user happened to load, which is a different quantity and remains uncomputable. Impact factor, JCR quartile, CAS partition and the list of this advisor's graduates are joined from CSV tables the user fills in by hand and passes in — the schemas, the worklist and the join are here, the scraping of a subscription database is not. Nine verbs — `harvest` collects one named researcher's papers and separates them from same-name authors, and can also ask the free keyless OpenAlex API which author id this name belongs to (listing every candidate rather than picking one) and merge that author's OpenAlex records in as a second source, deduplicated on DOI then PMID then title and year, with every record marked with which sources hold it; `cite` fetches citation counts into their own dated file; `journal-worklist` writes out the journals this corpus actually uses so they can be looked up; `journal-risk` collects DOAJ indexing status and Crossref metadata coverage for those journals from keyless public APIs and prints them as dated statements, never as a rating — nothing here calls a journal predatory; `profile` turns that corpus into the report, with seven inline-SVG figures and an optional PDF copy produced by whatever converter the machine already has; `compare` puts several corpora on one page; `diff` compares two harvests of one advisor and splits every "in one and not the other" count on whether the search window moved between them, because a wider window looks exactly like growth and is not; `download` re-runs only the PDF stage over an existing corpus; `clean-cache` drops expired failed downloads from the cache.
 triggers: check my advisor, evaluate a PI, what is this lab like, should I join this lab, advisor publication record, lab profile, PI profile, first-author slots, time to first author, compare two advisors, rank two advisors, PI citation counts, journal impact factor table, JCR quartile, CAS partition, advisor graduate list, 查导师, 选导师, 对比两个导师, 导师打分, 这个老板怎么样, 实验室发表记录, 期刊分区, 影响因子, 中科院分区, 毕业名单, 学位论文
 tools: Read, Bash, Grep, Glob
 model: inherit
@@ -61,34 +61,49 @@ dropped when you quote them:
   same components under the same weight table. A four-component mean and a
   six-component mean share a scale, not a subject.
 
-**Refused, whatever the data.** A percentile or quantile position: nothing here
-holds a reference population, every normalisation anchor is a declared constant
-rather than a value measured off a group of researchers, and no calculation sees
-more than the few corpora on one page — so a percentile is uncomputable here,
-not merely withheld. A letter grade: stars are produced and letters are not, and
-that split between two coarsenings of one number is a decision, not an
-inconsistency waiting to be tidied. Fitted trends, slopes and year-over-year
-percentage change: a handful of right-censored integer counts do not support a
-slope, and 3 papers to 5 is not "+67%". And no ordering of **people**, anywhere:
-no roster in any report is sorted by a count, and what `compare` ranks is
-corpora, which are files.
+**Refused, whatever the data.** A position among the corpora on one page:
+`compare` shows "3rd of the 5 you loaded" and stops there, because a position
+inside a set the user assembled moves whenever an unrelated corpus is added or
+dropped. Every normalisation anchor in `composite_score` is a declared constant
+rather than a value measured off a group of researchers, so the composite score
+has no percentile either and never will. Year-over-year percentage change: 3
+papers to 5 is not "+67%".
+
+**Unbanned in round four, with what each was traded for.** A *letter band*, which
+is the star band relabelled on the same boundaries — the two are derived from one
+table so they cannot drift apart. A *fitted slope* in Section 9: the original
+objection stands, a handful of right-censored integer counts do not support one,
+so the slope is printed only above four points and only with its confidence
+interval and point count in the same sentence. An *ordering of people* in
+Section 2, as a second table beside the roster rather than by sorting it, with
+the size of the roster printed beside the ranks. And a *percentile* against an
+external cell — every OpenAlex work sharing a paper's topic and year — which is
+not the refused quantity above: that population is the same whether this run
+loaded one corpus or nine.
 
 **Absent until you supply the table.** Journal Impact Factor, JCR quartile and
-CAS partition (Section 18); the list of this advisor's graduates (Section 17).
-The machinery for both is built and idle: the tool defines the CSV schema, scans
-the corpus to say which entries you actually need, joins what you hand back, and
-prints the source and the date beside every number. It fetches none of
+CAS partition (Section 18); the list of this advisor's graduates (Section 17);
+what other people have said about this advisor (Section 20). The machinery for
+all three is built and idle: the tool defines the CSV schema, scans the corpus
+to say which entries you actually need, joins what you hand back, and prints the
+source and the date beside every number. It fetches none of
 it and ships no crawler — those tables live in subscription databases that
-forbid scraping, and the degree libraries defend against it. Without a file
+forbid scraping, the degree libraries defend against it, and the pages carrying
+student evaluations permit automated collection least of all. Without a file
 those sections say "no table was supplied" and name the command that starts the
-job, rather than leaving a blank column you have to interpret. See **Two tables
-you fill in by hand** below.
+job, rather than leaving a blank column you have to interpret. See **Three
+tables you fill in by hand** below.
 
 **Never visible, from any file.** What the group is like to be in day to day.
 Whether the PI is decent to work for. And the people who enrolled and left
 before finishing — who are in no library at all, not CNKI, not Wanfang, not
 PubMed. The graduate roster narrows the missing group; it does not close it, and
-a report with a roster joined is still not counting everyone who joined.
+a report with a roster joined is still not counting everyone who joined. Section
+20 does not close the first two either: an evaluation table reproduces what a
+few people chose to write down, attributed and dated, and the tool computes
+nothing over it — no sentiment, no average, no rating. Reading those statements
+is not the same as measuring the thing they describe, and this report never
+pretends otherwise.
 
 Every report carries the middle two lists in full. Section 14 registers what is
 not computed and says of each line whether it was refused, is waiting on a file,
@@ -120,18 +135,65 @@ python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" cite --output-dir ./record
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" journal-risk --output-dir ./record
 ```
 
 ```bash
 python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" profile \
     --pi-name "Wang Wei" --output-dir ./record \
     --journal-table ./record/journals.csv \
-    --thesis-roster ./record/theses.csv
+    --thesis-roster ./record/theses.csv \
+    --evaluation-table ./record/evaluations.csv \
+    --pdf
 ```
 
-Both table flags are optional and neither is a gate: drop them and Sections 17
-and 18 print the reason they are empty and the command that fills them, while
-Sections 1 to 16 are untouched.
+All three table flags are optional and none of them is a gate: drop them and
+Sections 17, 18 and 20 print the reason they are empty and the command that
+fills them, while Sections 1 to 16 are untouched. A file that will not load is
+not a gate either — it is logged loudly, named, and the section says the same
+thing. `cite` and `journal-risk` are optional in the same way: `profile` picks up
+their newest file automatically, and says which command would produce one when
+there is none.
+
+`--pdf` writes a PDF beside the HTML using whatever converter this machine
+already has — wkhtmltopdf, Chrome/Chromium/Edge headless, weasyprint or
+LibreOffice, tried in that order. **It adds no dependency and installs nothing.**
+With none of them present it prints one line per converter saying how to install
+it and carries on; the HTML, Markdown and JSON outputs are byte-identical either
+way. `--pdf-converter` picks one, `--pdf-converter-path` names a binary that is
+installed but not on PATH — which on Windows is the normal state of both Chrome
+and LibreOffice.
+
+### A second source: OpenAlex
+
+```bash
+# Ask who publishes under this name. Prints every candidate; picks none unless
+# there is exactly one.
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
+    --author "Wang Wei" --affiliation "Peking Union Medical College" \
+    --resolve-openalex --output-dir ./record --no-download
+```
+
+```bash
+# Once you know which candidate is the right one: harvest PubMed and OpenAlex
+# together and merge them.
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
+    --author "Wang Wei" --openalex-author-id A5023888391 --openalex-works \
+    --output-dir ./record --no-download
+```
+
+The merge deduplicates on DOI, then PMID, then normalised title plus year — the
+first two are exact and the third is the only one that can be wrong, which is
+why it is last. When both sources hold a paper the PubMed record wins, because
+its record carries the affiliation strings and corresponding-author emails every
+identity check downstream reads and OpenAlex's does not. Every record carries
+`source` (whose metadata it holds) and `confirmed_by` (every source that holds
+it), and Section 1 prints both denominators: the PubMed corpus and the merged
+corpus are different numbers and are never printed as one.
+
+`--email` is passed to OpenAlex as `mailto`. It is not a key — OpenAlex has
+none — it only moves the request into a faster rate-limit pool, and it is
+omitted when not configured.
 
 Separate commands because the two network-bound steps — harvesting the papers
 and fetching the citation counts — are slow, while the report is instant and
@@ -139,7 +201,34 @@ offline: harvest once, re-read the record many times.
 `harvest` writes `papers_<timestamp>.json`; `profile` reads the most recent one
 in `--output-dir` unless `--papers-json` says otherwise, and writes three files
 from one run: `advisor_profile_<timestamp>.html` (the one to read), plus `.md`
-and `.json` beside it for quoting and for machine consumption.
+and `.json` beside it for quoting and for machine consumption. `--pdf` adds a
+fourth, on the same timestamp stem, if the machine has a converter for it.
+
+The HTML carries seven figures, every one an inline SVG this package emits
+itself: no matplotlib, no external JavaScript, no webfont, no network reference
+of any kind, so the page renders from a thumb drive and prints as it appears.
+The `<text>` in them is real text, so find-in-page reaches a person inside a
+figure and a screen reader reads it, and every figure states its own denominator
+inside the SVG because a chart gets screenshotted away from its caption. Two of
+them are worth naming here:
+
+- **Co-author clusters** (Section 19) draws the partition Section 19 already
+  computed — one panel per cluster, one node per person recurring in it, a line
+  where two share a byline, and the cluster's size printed as `k of N records`.
+  Nothing is recomputed for the picture, so the picture and the prose beside it
+  cannot disagree about who is in which group. A name that appears in two panels
+  is ringed and named in the caption; that, not the number of clusters, is the
+  thing worth reading, because it is what tells you whether the corpus is one
+  person. No panel is ordered by any count.
+- **Records per year by byline position** (Section 7) is one lane per position —
+  first, last, sole, middle, not located — over a shared year axis, one square
+  per record, with the partial and indexing-lag bins marked. Read down a column
+  for that year's output and across the lanes for where the PI stood on it. On a
+  corpus harvested with a byline-position filter it draws nothing and says why:
+  the filter would be the metric.
+
+Nothing in either figure is a rank, a rate or a fitted direction, and no percent
+sign appears in any figure at any sample size.
 
 `cite` is optional and sits between the two. It reads the same newest
 `papers_<timestamp>.json` and writes `citations_<timestamp>.json` beside it,
@@ -175,7 +264,17 @@ profile | tail` reports tail's status, not the interpreter's.
 
 Drop `--no-download` on `harvest` to also race eight open-access sources for the
 PDFs. `--api-key` raises NCBI's rate limit from 3/s to 10/s, and matters only
-there: the citation sources take no key at all.
+there: the citation sources take no key at all. The harvest paces itself to
+whichever limit applies — one shared minimum interval for every esearch page and
+every efetch batch — so a long harvest slows down rather than collecting 429s.
+
+`harvest` pages through the whole result set: `retmax` (default 500) is the size
+of one esearch page, and `max_records` (default 10000) is the total it will
+collect. 10000 is NCBI's own ceiling — esearch cannot return more than the first
+10000 records of a PubMed query, whatever retstart asks for — so raising it past
+that buys nothing; narrow the query or split it by year instead. When a name
+matches more than the budget, the harvest takes the first `max_records` and the
+report prints how many of how many were retrieved.
 
 Two maintenance verbs exist for when the PDF stage is the only thing you want to
 redo. `download` re-runs that stage alone over an existing `papers_*.json`,
@@ -238,17 +337,27 @@ nowhere to put that caveat, so it is not written at all in that case.
 `compare` joins no journal table and no thesis roster. Those are per-corpus and
 live in each corpus's own `profile` report.
 
-## Two tables you fill in by hand
+## Three tables you fill in by hand
 
 Journal partitions and degree theses live behind subscriptions that forbid
-scraping and defend against it. There is no crawler in this package and none is
-planned. The division of labour is fixed and it is the same for both tables: the
-tool **defines the schema, says which entries this corpus actually needs, joins
-what you hand back, and prints where every number came from and when**. Going
-and looking the entries up is yours.
+scraping and defend against it; student evaluations live on forums and review
+pages that permit it least of all. There is no crawler in this package and none
+is planned. The division of labour is fixed and it is the same for all three
+tables: the tool **defines the schema, says which entries this corpus actually
+needs, joins what you hand back, and prints where every number came from and
+when**. Going and looking the entries up is yours.
 
-Both paths can also live in the config file instead of on the command line, at
-`journals.table_path` and `theses.roster_path`. The flag wins where both exist.
+What *is* fetched, and the line between the two: citation counts (`cite`) and
+journal risk signals (`journal-risk`) come from keyless public JSON APIs whose
+terms permit exactly this — a documented API call, not a scrape of a vendor page.
+Both write their own dated files, both record which endpoint answered and when,
+and neither is ever written back into a table you filled in. A value you typed
+and a value an API returned last Tuesday have to stay distinguishable in the
+report, so they are never merged into one column.
+
+All three paths can also live in the config file instead of on the command line,
+at `journals.table_path`, `theses.roster_path` and `evaluations.table_path`. The
+flag wins where both exist.
 
 ### Journal metrics — `journal-worklist`, then `profile --journal-table`
 
@@ -308,6 +417,66 @@ prints coverage against both denominators, papers and distinct journals, since a
 table can cover most papers while missing most journals and those two facts point
 at different work.
 
+### Public risk signals — `journal-risk`, then `profile`
+
+Three things about a journal *are* free to look up, from keyless public APIs, and
+this verb collects them:
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" journal-risk --output-dir ./record
+```
+
+It reads DOAJ indexing status, Crossref metadata deposit coverage and OpenAlex's
+source record for every journal in the corpus that carries an ISSN, and writes
+`journal_risk_<timestamp>.json` — its own dated file, one `fetched_at` per
+record, nothing written back into the corpus and nothing written into the CSV you
+filled in. `profile` picks up the newest one automatically and Section 18 prints
+each statement beside the endpoint that returned it and the day it was read.
+`--journal-risk-json` names a different file; `--no-journal-risk` skips it and
+the section says the flag is why.
+
+**Nothing here calls any journal predatory, and you should not either on this
+evidence.** "Predatory" is an accusation about a publisher's conduct. None of
+these three APIs makes it, this tool does not make it, and no count of these
+signals is turned into a grade, a tier, a score, a letter or a colour at any
+number of them. They contribute nothing to the composite score. What Section 18
+prints is a list of statements — `未被 DOAJ 收录`, `Crossref 元数据缺失 3 项（共查
+10 项）` — each with its source and its date, and the reading is yours.
+
+Two of them are misread almost every time, so the section says the opposite out
+loud beside them:
+
+- **Not being in DOAJ is not a finding.** DOAJ indexes open-access journals that
+  applied to it. Journal of Hepatology is not in DOAJ and never will be; nor is
+  most of the subscription literature in medicine. Reading absence as a warning
+  flags a large part of the ordinary field.
+- **A Crossref coverage field reading zero is not a finding either.** It measures
+  what a publisher deposits. Journal of Hepatology deposits no abstracts for its
+  backfile; run this against it and you get "3 of 10 tracked fields at zero" for
+  a journal nobody questions. Only current-content fields are counted, the list
+  of them is fixed and printed, and the count always travels as N of M.
+
+All three sources are queried every time and none of them wins. They answer
+different questions and disagree routinely — OpenAlex keeps its own copy of the
+DOAJ flag and it can lag DOAJ's live answer, and its Scopus field is `null` for a
+great many real journals, which is a third value and is never printed as "not
+indexed". Where two disagree, both lines are printed with their dates.
+
+**The 中科院国际期刊预警名单 is not fetched and will not be.** It is published once
+a year as a login-walled page and a PDF with no JSON and no CSV endpoint. It
+stays in the hand-filled `是否预警` / `预警等级` columns above, where a person
+copies it once a year — one list, a couple of dozen journals, cheaper to copy
+than to maintain a scraper for, and scraping it is not permitted anyway. Beall's
+list and its mirrors are the same case with no publisher behind them. A blank
+`是否预警` cell still means nobody checked, and no signal in this block fills it
+in.
+
+`journal-worklist --risk-json` copies the signal *names* and the day they were
+read into two extra template columns, so the person filling in the partition
+columns can see which journals to look at harder. The full sentences stay in the
+JSON and in the report; a CSV cell holding five paragraphs breaks every
+spreadsheet it is opened in.
+
 ### Graduates — `profile --thesis-roster`
 
 Export this advisor's supervised theses from CNKI or 万方 by hand and pass the
@@ -339,6 +508,47 @@ library at all. This denominator is better than PubMed's and it is still not
 everyone who joined. Nothing here is a graduation rate or an attrition rate;
 neither has an observable denominator.
 
+### Student evaluations — `profile --evaluation-table`
+
+Collect the statements yourself, from whatever public pages carry them, and pass
+the CSV. Required columns: `导师姓名`, `评价来源`, `数据获取日期`, and at least
+one of `评价内容` or `维度评分`. Optional: `学生身份`, `评价年份`, `原文链接`,
+`导师姓名拼音`. A file missing a required column is refused at load with the
+column named and the headers it did find printed beside it — the same rule the
+journal table's `版本来源` lives by, for the same reason: an unattributed,
+undated sentence about a named person cannot be checked by anyone later,
+including the person who wrote it down.
+
+This is the one table with no worklist command, and there will not be one.
+`journal-worklist` can write the list of journals because the corpus already
+names them; nothing in a corpus names the places people talk about an advisor.
+The searching, reading and typing are entirely yours, and the tool fetches
+nothing.
+
+Section 20 prints what comes back: how many statements were attributed to this
+advisor out of the usable rows in the file, how many distinct sources they came
+from with the per-source counts, the span of years the statements themselves
+cover, the span of days you read the pages on, and then every statement in file
+order with its source and its retrieval date attached.
+
+**No sentiment analysis, no aggregate, no score.** Nothing here is labelled
+positive or negative, nothing is averaged, nothing is rated, and no row reaches
+the composite score in Section 16 at any weight, including zero. That is not an
+oversight to be filled in later. These are a handful of statements by people who
+chose to write something down, so any average over them measures who bothered to
+post; a number computed from them would carry the authority of a measurement and
+would be quoted long after the text it came from was forgotten. The statements
+are reproduced, attributed and dated, and the judgement is yours.
+
+Three limits travel with them and must travel with any quote. Nobody is sampled:
+people post after an experience strong enough to be worth typing up, in either
+direction, and there is no observable denominator of students who could have
+posted. Authorship is unverifiable: nothing in a post proves the writer was ever
+this advisor's student, or that two posts are two people. And an advisor with
+twenty years of students is not the same supervisor throughout — `评价年份` is
+optional because most sources do not carry it, and rows without it cannot be
+placed in time at all, so the printed span covers only the rows that can.
+
 ## The corpus decides everything — configure identity first
 
 Every number in the report is computed over the papers `harvest` kept. If
@@ -363,6 +573,27 @@ strength:
 `--require-affiliation` turns a non-matching institution from "kept and marked
 unverified" into "rejected".
 
+### Letting OpenAlex propose the identity
+
+`--resolve-openalex` asks the free, keyless OpenAlex authors API who publishes
+under this name, optionally narrowed by `--affiliation`, and prints each
+candidate with its author id, its ORCID if OpenAlex holds one, its institution
+history and its works count.
+
+**One candidate is adopted. Two or more are listed and none is adopted.** Pick
+the one you recognise and re-run with `--openalex-author-id A5023888391`.
+Choosing the most productive candidate automatically would decide an identity
+question on a proxy, which is the same error as accepting a bare name match, and
+it would leave no sign in the report that a choice had been made.
+
+An adopted id is recorded as its own kind of evidence, beside the three above
+and never folded into them: those three are the researcher's own assertion,
+while an author id is OpenAlex's clustering — right most of the time and wrong
+in a way nothing on the page can show. Section 1 prints the id, the query, the
+source and the date it was fetched. If OpenAlex holds an ORCID for the adopted
+candidate the log says so and stops there; it is not written in as if you had
+supplied it.
+
 Measured difference on a real run of one Chinese surgeon, five years, same
 search either way: with no evidence, 186 records came back and every one was
 marked unverified. With ORCID + institution + email domain, 210 records came
@@ -370,7 +601,11 @@ back and **50 were kept, 160 rejected** — the rejected ones being a county
 hospital endoscopist, a Beijing aging consortium, a Shanghai emergency
 physician, a mathematics department and a nursing college, all sharing the name.
 
-The report refuses to render if the harvest recorded no evidence (gate G3).
+If the harvest recorded no evidence at all, the report still renders — with a
+warning in a box at the top of Sections 0, 1 and 19 naming the condition, the
+observed values and the fix, with Section 14 recording that this used to be a
+refusal, and with the process exiting 1. See "It warns rather than refusing"
+below for why that changed.
 
 **The evidence is recorded into `papers_<timestamp>.json` and the gate is
 decided from that**, not from the config in force when the report runs. Passing
@@ -380,13 +615,15 @@ config file it was never harvested with.
 
 ### What G3 does not catch, and Section 19 does
 
-G3 refuses a corpus harvested with *no* evidence. The dangerous case passes it:
-weak evidence — an affiliation keyword that half a province matches — produces a
+G3 is raised for a corpus that no configured evidence actually *reached* —
+nothing set, or something set that matched not one record, or an OpenAlex id
+that reached too little of it. The dangerous case still
+raises nothing at all: weak evidence that does reach the records — an affiliation keyword that half a province matches — produces a
 complete, normal-looking report about several people. A real run for one Chinese
 surgeon, keyed on a province name rather than the full institution, returned 28
 records spanning gastrointestinal surgery, analytical chemistry, structural
-biology, soil microbiology and machine learning. It passed every gate and scored
-78.2 out of 100.
+biology, soil microbiology and machine learning. It raised no warning, passed every gate and
+scored 78.2 out of 100.
 
 Section 19 is the check for that. It removes the PI, who is on every record by
 construction, and asks which records are still tied together by a shared
@@ -410,29 +647,102 @@ reading is yours.
 If they look like different people, nothing else in the report is worth quoting.
 Re-harvest with `--orcid`.
 
-## It refuses rather than degrading
+## It warns rather than refusing
 
-Five gates are checked before anything is computed. A fired gate produces a
-refusal page naming the gate, the observed values, and the fix — not a report
-with a warning at the top, because a warning gets scrolled past.
+Three gates are checked before anything is computed. A fired gate produces a
+refusal page naming the gate, the observed values and the fix, and nothing else.
 
 | Gate | Fires when | Why nothing can be reported |
 |---|---|---|
-| G1 | esearch matched more records than were retrieved | Every count would be wrong by an unbounded amount. Raise retmax, cut `years_back`, or add affiliation keywords, then re-harvest |
-| G2 | no paper passed identity verification | The corpus is "everyone sharing this name" and describes several people |
-| G3 | no identity evidence configured at all | A name-only corpus blends several people for any common surname |
-| G4 | corpus has no structured author records | The report cannot be built from the spreadsheet export; re-run harvest |
+| G4 | corpus has no structured author records | There is nothing to compute over; the report cannot be built from the spreadsheet export, so re-run harvest |
 | G5 | 0 papers remain after exclusions | Nothing to report |
+| G6 | the corpus records more verified records than it fetched | The two PubMed counts contradict each other, so every denominator on the page is wrong by an unknown amount. Written by a version that overwrote `verified` with the merged corpus size; re-run harvest over the same output directory |
 
-Below the gates there are suppression floors: an aggregate computed over too few
-people is replaced by a plate showing the actual n rather than a number that
+Three more conditions used to sit here as gates and are now **warnings**. They
+are the most important things this report can say about itself, and refusing
+over them destroyed sixteen sections of computed fact to prevent one claim —
+including Section 19, whose entire job is to show a reader whether the corpus
+holds several people, and which a reader of a refusal page never got to see.
+
+| Warning | Raised when | What it costs |
+|---|---|---|
+| G1 | esearch matched more records than the harvest retrieved | The corpus is part of what the query found; every count below is a floor, and nothing on the page can say whether the missing records look like the ones that arrived |
+| G2 | no paper passed identity verification | The corpus is "everyone publishing under this name" and may describe several people |
+| G3 | no identity evidence reached enough of the corpus | A name-only corpus blends several people for any common surname |
+
+A fourth warning was never a gate and is listed apart for that reason — Section
+14 files it under its own heading rather than under "downgraded", because saying
+it used to refuse reports would be untrue.
+
+| Warning | Raised when | What it costs |
+|---|---|---|
+| G7 | the target name is on no byline in the corpus | No section is about the person named. The roster removed no target researcher and counts one person too many, Section 7 has no byline slot to report, and every phrase reading "the target researcher" names somebody the corpus does not contain |
+
+A raised warning prints in a box at the top of the sections it affects — the
+condition, the observed values, the fix. G2 and G3 land on Sections 0, 1 and 19;
+G1 lands on Sections 0, 1 and 9, the per-year count a partial harvest deflates
+most visibly; G7 lands on Sections 0, 1, 2 and 7, the two whose opening sentences
+it falsifies. Section 14 records that G1, G2 and G3 each used to refuse, and
+**the process still exits 1** for all four, so anything scripted against the old
+refusal behaves as it did. Two things a warning does not do: it does not certify
+the corpus, and it does not let it take a position on a `compare` page. Such a
+corpus keeps its row, keeps its score inside that row, and holds no rank.
+
+G7 covers a question none of the corpus's other readers asks. The evidence
+histogram in Section 1 is derived from each record's role string and the OpenAlex
+share is a record-level id count; neither consults the target name. Profile a
+corpus under a mistyped `--pi-name` and both went on printing `N of N` while
+`roles.resolve_pi` rejected every record — the run exited 0 with nothing anywhere
+saying the name had not been found. Section 1 now prints `target name on records:
+N of M` on **every** run, warning or not, and raises G7 when N is 0. No share
+boundary is applied to it: the ratio is printed so a corpus the name reached a
+minority of is visible, and inventing a second arbitrary constant beside
+`min_openalex_record_share` would recreate the thing that constant exists to
+remove. The fix is to correct the name and re-run `profile`; nothing needs
+re-harvesting, because the corpus is unchanged and only the name it was read
+against was wrong.
+
+G1 took a detour worth knowing about, because you may have notes from either
+side of it. It was deleted outright when the harvest learned to page: a shortfall
+between the esearch count and the PMIDs retrieved stopped meaning "cut off at
+retmax" and started meaning the `max_records` budget stopped a very common name,
+or the pages repeated a PMID, or PubMed's own hit count moved mid-harvest. None
+of those is worth withholding a report — that much still holds, which is why G1
+is not a gate. But deleting it left no mark on the page at all: a corpus 40%
+retrieved rendered clean, exited 0, and sat on a `compare` page ranked beside
+corpora retrieved in full. It is back at warning strength. Section 1 still prints
+`retrieved N of M records esearch matched` and still says every count below is a
+floor; Section 14's reversal register records the round trip.
+
+G3's boundary is a share, not a yes/no. An OpenAlex author id counts as identity
+evidence for the corpus only once it reaches at least
+`identity_evidence.min_openalex_record_share` of the records (default 0.5), and
+Section 1 prints the ratio measured and the boundary in effect side by side. The
+old test was "does any record carry it", which is a threshold of one record that
+nobody declared: five bare name matches plus one merged OpenAlex record silenced
+the warning outright.
+
+G3 is also decided on what the evidence reached rather than on what was
+configured, and Section 14's register records the reversal. An `orcid` in the
+config that matches no byline in the corpus used to clear the warning and exit
+0, while the same corpus with the field blank warned and exited 1 — the same
+evidence, none, judged two ways. Such corpora now warn, so expect more runs to
+exit 1 than before. The banner says which of the three happened — nothing
+configured, configured and matching nothing, or an id below the share — and the
+reach it is talking about is printed on the same line as `identity_evidence_on_records`.
+
+Below all of this there are suppression floors: an aggregate computed over too
+few people is replaced by a plate showing the actual n rather than a number that
 looks solid. Those floors are part of the specification and are not exposed as
 options.
 
 ## Reporting to the user
 
 1. If a gate fired, report the gate and its fix. Do not paraphrase the numbers
-   from a refused report — there are none.
+   from a refused report — there are none. If an identity **warning** was
+   raised, the numbers exist and may be quoted, but every quote has to carry the
+   warning with it: the corpus may describe more than one researcher, and no
+   count below is certified to be about the person named.
 2. Lead with the roster and the first-author distribution; those are what the
    question "what is it like to be their student" actually turns on.
 3. Quote every count with its denominator, exactly as the report prints it.
@@ -484,6 +794,14 @@ Both degrade with a tested fallback; neither is required.
   quarantined — the check reports "identity check skipped" and keeps the file.
 - **openpyxl** enables the `.xlsx` export. Without it the same data is written
   as a timestamped CSV.
+- **An HTML-to-PDF converter** — wkhtmltopdf, Chrome/Chromium/Edge, weasyprint or
+  LibreOffice — lets `profile --pdf` write a PDF beside the HTML. None of them is
+  imported: this package runs a program that is already on the machine and never
+  fetches an installer. Without one, `--pdf` prints how to install each and the
+  HTML output is unchanged, which is the point — the HTML *is* the deliverable
+  and a PDF is a second copy of it. The standard library cannot lay out a page,
+  and adding reportlab or weasyprint as a hard dependency would have broken "no
+  install needed" for everyone in order to give some people a second file format.
 
 ## Tests
 
