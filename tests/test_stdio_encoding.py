@@ -91,6 +91,21 @@ check_true("no log line was swallowed by the logging machinery",
 check_true("the Chinese message survived intact", "没找到 papers_*.json" in out)
 
 
+print("\n--version, which used to fall through to the fetch parser")
+# With no subcommand every argument goes to `fetch`, whose parser met
+# `--version` with a usage error and exit 2, so an installed copy could not say
+# which release it was. Run through the real entry point, under the same codec
+# that cannot hold Chinese: the usage error was Chinese.
+sys.path.insert(0, str(RUN_PY.parent))
+from check_your_advisor import __version__  # noqa: E402
+
+for flag in ("--version", "-V"):
+    r = run([flag])
+    check(f"{flag} exits 0", r.returncode, 0)
+    check(f"{flag} prints the package version and nothing else",
+          r.stdout.strip(), f"check-your-advisor {__version__}")
+
+
 print("\nThe guard is in the product, not in the environment")
 # If this ever starts depending on PYTHONIOENCODING being pre-set, the assertion
 # above would still pass under run_all.py (which sets it) and fail for a user.

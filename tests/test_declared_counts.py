@@ -32,6 +32,7 @@ Run: python tests/test_declared_counts.py
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 import sys
@@ -189,6 +190,35 @@ check("cli.py's docstring lists every verb main() dispatches"
 check("SKILL.md names every verb"
       "  [add the missing verb to SKILL.md]",
       sorted(v for v in verbs if f"`{v}`" in text("SKILL.md")), verbs)
+
+
+# ======================================================================
+# The version: one number, written in three places
+# ======================================================================
+#
+# pyproject.toml is what PyPI published. `__version__` is what the package says
+# about itself. plugin.json is what Claude Code compares when a copy installed
+# from a marketplace asks for an update — a stale one there keeps that copy
+# where it is however many releases follow. 0.3.0 shipped with 0.3.0, 0.3.1 and
+# 0.2.0 in those three places, respectively.
+
+print("\n[version] pyproject.toml, __version__ and plugin.json")
+
+_pyproject_version = re.search(r'^version\s*=\s*"([^"]+)"', text("pyproject.toml"), re.M)
+_dunder_version = next(
+    (node.value.value for node in ast.parse((PKG / "__init__.py").read_text(encoding="utf-8")).body
+     if isinstance(node, ast.Assign)
+     and any(getattr(t, "id", "") == "__version__" for t in node.targets)
+     and isinstance(node.value, ast.Constant)),
+    None)
+_plugin_version = json.loads(text(".claude-plugin/plugin.json")).get("version")
+check_true("pyproject.toml declares a version", _pyproject_version)
+check("__version__ is pyproject's version"
+      "  [bump scripts/check_your_advisor/__init__.py with pyproject.toml]",
+      _dunder_version, _pyproject_version.group(1) if _pyproject_version else None)
+check(".claude-plugin/plugin.json's version is pyproject's version"
+      "  [bump .claude-plugin/plugin.json with pyproject.toml]",
+      _plugin_version, _pyproject_version.group(1) if _pyproject_version else None)
 
 
 # ======================================================================
