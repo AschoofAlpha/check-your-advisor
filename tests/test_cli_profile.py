@@ -1365,12 +1365,29 @@ _windowed(_new_d, _shared + [
     "2019/01/01", "2022/12/31")
 
 _diff_out = os.path.join(_base, "diff.json")
-_diff_code = cli.main(["diff", _old_d, _new_d, "--out", _diff_out])
+# Run from an empty directory, so anything the verb leaves behind in the place it
+# was started from is visible. `cmd_diff` used to call setup_logging(args.log_level)
+# and so made a folder named INFO there on every run.
+_cwd, _run_dir = os.getcwd(), tempfile.mkdtemp()
+os.chdir(_run_dir)
+try:
+    _diff_code = cli.main(["diff", _old_d, _new_d, "--out", _diff_out, "--log-level", "DEBUG"])
+    _diff_level = logging.getLogger("check_your_advisor").level
+    _missing_new = os.path.join(_base, "never-harvested")
+    _missing_code = cli.main(["diff", _old_d, _missing_new])
+finally:
+    os.chdir(_cwd)
 for _handler in list(logging.getLogger("check_your_advisor").handlers):
     _handler.close()
 logging.getLogger("check_your_advisor").handlers.clear()
 
 check("diff exits 0", _diff_code, 0)
+check("diff leaves nothing in the directory it was run from", os.listdir(_run_dir), [])
+check_true("...writes its log beside the newer corpus instead",
+           [f for f in os.listdir(_new_d) if f.startswith("download_") and f.endswith(".log")])
+check("...at the level --log-level asked for", _diff_level, logging.DEBUG)
+check_true("a newer directory that does not exist is an error", _missing_code != 0)
+check("...and is not created just to hold a log", os.path.exists(_missing_new), False)
 _diff = json.load(open(_diff_out, encoding="utf-8"))
 check("one record is in the newer corpus only", _diff["papers"]["n_only_in_new"], 1)
 # The assertion this whole verb exists for. One more paper, and none of it is

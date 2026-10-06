@@ -67,11 +67,8 @@ from check_your_advisor import __version__
 from check_your_advisor.config import DEFAULT_CONFIG, load_config
 
 
-def setup_logging(output_dir: str, level: str = "INFO"):
-    """配置日志：同时输出到控制台和文件"""
-    os.makedirs(output_dir, exist_ok=True)
-    log_file = os.path.join(output_dir, f"download_{datetime.now():%Y%m%d_%H%M%S}.log")
-
+def setup_logging(output_dir: str | None, level: str = "INFO"):
+    """配置日志：同时输出到控制台和文件；output_dir 为 None 时只输出到控制台"""
     root = logging.getLogger("check_your_advisor")
     root.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.handlers.clear()
@@ -81,6 +78,11 @@ def setup_logging(output_dir: str, level: str = "INFO"):
     console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
     root.addHandler(console)
+
+    if output_dir is None:
+        return None
+    os.makedirs(output_dir, exist_ok=True)
+    log_file = os.path.join(output_dir, f"download_{datetime.now():%Y%m%d_%H%M%S}.log")
 
     # 文件（DEBUG 级别，记录所有细节）
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
@@ -365,7 +367,13 @@ def cmd_diff(argv: list[str]):
     drawn the wrong conclusion, and no amount of caveat further down undoes it.
     """
     args = parse_diff_args(argv)
-    setup_logging(args.log_level)
+    # The log goes beside the newer corpus, where `profile` writes its own. This
+    # used to read setup_logging(args.log_level): the level arrived as the log
+    # *directory*, so every run made a folder named INFO in whatever directory it
+    # was started from, and --log-level never reached the logger. A directory
+    # that does not exist is not created for a log — here it is an input, and
+    # the error about it comes below — so that case logs to the console only.
+    setup_logging(args.new_dir if os.path.isdir(args.new_dir) else None, args.log_level)
     logger = logging.getLogger("check_your_advisor.diff")
 
     import json as _json
