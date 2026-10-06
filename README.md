@@ -335,7 +335,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-4933 assertions across 35 files, measured 2026-10-06 by the first command
+4942 assertions across 35 files, measured 2026-10-06 by the first command
 above — and that command re-measures it every run and fails if this sentence
 has drifted, which is why it is a number rather than a promise. The second run
 installs an import hook that
