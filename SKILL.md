@@ -888,3 +888,5 @@ It is the only thing that keeps "no install needed" true rather than merely
 claimed: exactly three assertions behave differently with every third-party
 package unavailable, and all three are the cases that need a real PDF file,
 which skip themselves. Nothing else in the suite changes between the two runs.
+On a machine without PyMuPDF the first run skips the same three, and the runner
+holds it to the total declared for a run without them instead of failing it.

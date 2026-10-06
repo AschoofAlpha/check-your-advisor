@@ -77,18 +77,32 @@ def count(output: str) -> tuple[int, int]:
 REPO = HERE.parent
 
 # Each entry is one sentence that states a count, and the groups it must yield.
-#   full    — assertions in a plain run
-#   blocked — assertions surviving --block-third-party
+#   full    — assertions in a plain run with PyMuPDF installed
+#   blocked — assertions surviving --block-third-party, which is also what a
+#             plain run produces on a machine without PyMuPDF (see below)
 #   files   — how many test files the suite has
 DECLARED: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("README.md",
-     re.compile(r"(?P<full>[\d,]+) assertions across (?P<files>\d+) files")),
+     re.compile(r"(?P<full>[\d,]+)\s+assertions\s+across\s+(?P<files>\d+)\s+files\s+with"
+                r"\s+PyMuPDF\s+installed,\s+(?P<blocked>[\d,]+)\s+without\s+it")),
     ("README.zh-CN.md",
-     re.compile(r"(?P<files>\d+) 个文件 (?P<full>[\d,]+) 条断言")),
+     re.compile(r"(?P<files>\d+) 个文件 (?P<full>[\d,]+) 条断言（装了 PyMuPDF 时；"
+                r"没装时 (?P<blocked>[\d,]+) 条")),
     ("pyproject.toml",
      re.compile(r"(?P<blocked>[\d,]+) of (?P<full>[\d,]+) assertions still pass"
                 r" \((?P<files>\d+) files")),
 )
+
+# What test_pdf_validation.py prints when PyMuPDF cannot be imported and its
+# real-PDF cases skip themselves. Those are the cases --block-third-party
+# removes, so a plain run that prints this measured the `blocked` figure, not
+# the `full` one. The gate used to demand `full` of every plain run, which made
+# `python tests/run_all.py` exit 1 on exactly the install the README promises —
+# nothing added — and told the reader to "fix" the docs to a number that would
+# then fail on every machine that has the extra. tests/test_declared_counts.py
+# checks the test file still prints this, so a reworded line cannot quietly
+# switch the gate back.
+PDF_SKIP_MARKER = "[SKIP] PyMuPDF not installed"
 
 
 def read_declarations() -> tuple[list[tuple[str, int, dict[str, int]]], list[str]]:
@@ -111,11 +125,21 @@ def read_declarations() -> tuple[list[tuple[str, int, dict[str, int]]], list[str
     return found, missing
 
 
-def check_declared_counts(measured_total: int, measured_files: int, blocked: bool) -> bool:
-    """True if the docs still describe this run. Prints what to edit if not."""
+def check_declared_counts(measured_total: int, measured_files: int, blocked: bool,
+                          pdf_cases_skipped: bool = False) -> bool:
+    """True if the docs still describe this run. Prints what to edit if not.
+
+    `pdf_cases_skipped` is whether a plain run's output carried PDF_SKIP_MARKER.
+    Read off what the run did rather than predicted from whether PyMuPDF looks
+    importable here: an install that is present but broken skips the cases too,
+    and the gate has to agree with the test file about which run happened.
+    """
     found, missing = read_declarations()
-    which = "blocked" if blocked else "full"
-    mode = "--block-third-party" if blocked else "a plain run"
+    without_pdf = blocked or pdf_cases_skipped
+    which = "blocked" if without_pdf else "full"
+    mode = ("--block-third-party" if blocked
+            else "a plain run without PyMuPDF" if pdf_cases_skipped
+            else "a plain run")
     problems: list[str] = []
 
     for name in missing:
@@ -139,13 +163,21 @@ def check_declared_counts(measured_total: int, measured_files: int, blocked: boo
 
     # The three sentences must also agree with each other, or fixing one run
     # leaves the other mode declaring a number nothing measures.
-    for field in ("full", "files"):
+    for field in ("full", "blocked", "files"):
         values = {counts[field] for _n, _l, counts in found if field in counts}
         if len(values) > 1:
             where = ", ".join(f"{n}:{l}={c[field]}" for n, l, c in found if field in c)
             problems.append(
                 f"  the three declarations disagree on '{field}': {where}\n"
                 f"      -> make them equal before deciding which is right.")
+
+    if pdf_cases_skipped and not blocked:
+        # Said on a passing run too. "Measured" is the word the docs use, and
+        # here one of the two numbers they state was not measured at all.
+        print("\nnote: PyMuPDF is not importable here, so test_pdf_validation.py skipped its"
+              "\n      real-PDF cases — the ones --block-third-party removes — and this plain"
+              "\n      run was held to the total declared for a run without them. The total"
+              "\n      with PyMuPDF installed is only measured where it is installed.")
 
     if not problems:
         return True
@@ -203,6 +235,7 @@ def main() -> int:
 
     total_pass = total_fail = 0
     broken: list[str] = []
+    pdf_cases_skipped = False
 
     for f in files:
         cmd = ([sys.executable, "-c", BOOTSTRAP, str(f)] if args.block_third_party
@@ -218,6 +251,7 @@ def main() -> int:
                               encoding="utf-8", errors="replace",
                               cwd=HERE.parent / "scripts", env=env)
         out = (proc.stdout or "") + (proc.stderr or "")
+        pdf_cases_skipped = pdf_cases_skipped or PDF_SKIP_MARKER in out
         passed, failed = count(out)
         total_pass += passed
         total_fail += failed
@@ -237,7 +271,7 @@ def main() -> int:
     # After the summary line, never before it: the summary is what a reader and
     # every script quote, and it must survive a drifted README unchanged.
     declared_ok = check_declared_counts(total_pass + total_fail, len(files),
-                                        args.block_third_party)
+                                        args.block_third_party, pdf_cases_skipped)
     return 1 if (total_fail or broken or not declared_ok) else 0
 
 
