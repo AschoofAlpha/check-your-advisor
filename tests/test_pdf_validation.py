@@ -14,6 +14,7 @@ import builtins
 import os
 import sys
 import tempfile
+import types
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
@@ -131,13 +132,15 @@ print("\n--- extract_pdf_text: missing PyMuPDF and the 200-character floor ---")
 _real_import = builtins.__import__
 
 
-def _no_fitz(name, *args, **kwargs):
-    if name == "fitz":
-        raise ImportError("No module named 'fitz'")
+def _no_pymupdf(name, *args, **kwargs):
+    # Both of PyMuPDF's module names: pdf_utils tries `pymupdf` and then `fitz`,
+    # so blocking one would leave the other to answer for it.
+    if name in ("pymupdf", "fitz"):
+        raise ImportError(f"No module named {name!r}")
     return _real_import(name, *args, **kwargs)
 
 
-builtins.__import__ = _no_fitz
+builtins.__import__ = _no_pymupdf
 try:
     check("a missing PyMuPDF is reported, not raised",
           extract_pdf_text("whatever.pdf"), ("", "PyMuPDF unavailable"))
@@ -165,13 +168,13 @@ check("a nonexistent path fails softly rather than raising",
 # the floor were deleted. Skipped rather than failed when the optional PyMuPDF
 # extra is not installed.
 if pdf_utils.pdf_text_extraction_available():
-    import fitz  # noqa: E402
+    _pdf_module = pdf_utils._pymupdf()
 
     def _real_pdf(lines: list[str]) -> str:
         # One line per list entry: a single long string would run off the page
         # width and only part of it would land in the text layer.
         path = os.path.join(tempfile.mkdtemp(), "real.pdf")
-        doc = fitz.open()
+        doc = _pdf_module.open()
         doc.new_page().insert_text((72, 72), "\n".join(lines))
         doc.save(path)
         doc.close()
@@ -185,7 +188,49 @@ if pdf_utils.pdf_text_extraction_available():
     check("the short PDF's text is still returned for the caller to inspect",
           "Short." in extract_pdf_text(_real_pdf(["Short."]))[0], True)
 else:  # pragma: no cover - depends on which extras are installed
+    # tests/run_all.py reads this line (PDF_SKIP_MARKER) to know that a plain run
+    # produced the total without these three cases. Reword it there too.
     print("  [SKIP] PyMuPDF not installed; real-PDF extraction cases not run")
+
+
+# ======================================================================
+print("\n--- which of PyMuPDF's two module names is used ---")
+# ======================================================================
+# PyMuPDF answers to `pymupdf` from 1.24.3 on and only to `fitz` before that,
+# and 1.28 warns that `fitz` is going away. Pinned with stand-in modules, so the
+# order is tested on every machine whichever PyMuPDF — if any — is installed,
+# and under --block-third-party too: an entry already in sys.modules is returned
+# without asking the import hooks.
+_saved_modules = {name: sys.modules.get(name) for name in ("pymupdf", "fitz")}
+_current, _legacy = types.ModuleType("pymupdf"), types.ModuleType("fitz")
+
+
+def _importable(names: set[str]):
+    def _import(name, *args, **kwargs):
+        if name in ("pymupdf", "fitz") and name not in names:
+            raise ImportError(f"No module named {name!r}")
+        return _real_import(name, *args, **kwargs)
+    return _import
+
+
+try:
+    sys.modules["pymupdf"], sys.modules["fitz"] = _current, _legacy
+    builtins.__import__ = _importable({"pymupdf", "fitz"})
+    check("the current name wins when both are importable",
+          pdf_utils._pymupdf() is _current, True)
+    builtins.__import__ = _importable({"fitz"})
+    check("an install that only has the old name still validates PDFs",
+          pdf_utils._pymupdf() is _legacy, True)
+    builtins.__import__ = _importable(set())
+    check("with neither name importable there is no module, and nothing raised",
+          pdf_utils._pymupdf(), None)
+finally:
+    builtins.__import__ = _real_import
+    for _name, _module in _saved_modules.items():
+        if _module is None:
+            sys.modules.pop(_name, None)
+        else:
+            sys.modules[_name] = _module
 
 
 # ======================================================================

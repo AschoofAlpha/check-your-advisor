@@ -40,13 +40,15 @@ classifiers = [
 # module in this package imports a third party at module scope, so importing it
 # never needs anything installed. Six non-stdlib imports exist at all, every one
 # inside a function body, and they name only the two optional extras below:
-# `openpyxl` in cli.py and export.py, `fitz` in pdf_utils.py. Four of the six sit
+# `openpyxl` in cli.py and export.py, and PyMuPDF in pdf_utils.py — once as
+# `pymupdf`, its name from 1.24.3 on, and once as `fitz`, the only name older
+# releases have. Four of the six sit
 # directly under `except ImportError`; the two in `save_to_excel` do not, because
 # both of its callers probe the same import under one before calling it.
 # The test suite proves the claim rather than restating
 # it: `python tests/run_all.py --block-third-party` installs an import hook that
 # makes requests, urllib3, pandas, numpy, matplotlib, fitz and openpyxl
-# unimportable, and 4951 of 4954 assertions still pass (35 files, measured
+# unimportable, and 4955 of 4958 assertions still pass (35 files, measured
 # 2026-10-06). Adding a dependency here would make that suite a claim nobody
 # checks. A plain run produces the second number where PyMuPDF is installed and
 # the first where it is not; every run re-measures whichever one it produced and

@@ -390,10 +390,12 @@ check("no module in the package imports a third party at module scope"
       _at_module, [])
 
 # pyproject enumerates the guarded ones by name. If a third one appears, that
-# enumeration became a lie and the extras table probably needs a row.
+# enumeration became a lie and the extras table probably needs a row. `pymupdf`
+# and `fitz` are one extra under its two module names: pdf_utils tries the
+# current one first and falls back to the one PyMuPDF before 1.24.3 has.
 check("the only guarded third-party imports are the two declared extras"
       "  [edit the comment above [project.optional-dependencies] in pyproject.toml]",
-      sorted(_guarded), ["fitz", "openpyxl"])
+      sorted(_guarded), ["fitz", "openpyxl", "pymupdf"])
 
 # pyproject used to say "Every import in this package is from the standard
 # library", which six guarded imports had already falsified. The replacement

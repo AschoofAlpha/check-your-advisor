@@ -12,7 +12,7 @@ import html
 import logging
 import re
 from pathlib import Path
-from typing import Mapping, Protocol
+from typing import Any, Mapping, Protocol
 
 logger = logging.getLogger("check_your_advisor.pdf")
 
@@ -101,6 +101,28 @@ def _title_tokens(title: str) -> set[str]:
     return {w for w in words if len(w) >= 4 and w not in STOP_WORDS}
 
 
+def _pymupdf() -> Any:
+    """
+    PyMuPDF's module, under whichever name this install provides, or None.
+
+    `pymupdf` is the name from PyMuPDF 1.24.3 on, and 1.28 warns on `import
+    fitz` that the old name is going away. Under `except ImportError` the release
+    that drops it would have turned identity validation into a silent no-op on
+    every machine that still had the extra installed, so the current name is
+    tried first. `fitz` is still tried second because it is the only name
+    1.23.x to 1.24.2 have, and the `PyMuPDF>=1.23` floor in pyproject promises
+    those work.
+    """
+    try:
+        import pymupdf
+    except ImportError:
+        try:
+            import fitz as pymupdf  # PyMuPDF before 1.24.3
+        except ImportError:
+            return None
+    return pymupdf
+
+
 def pdf_text_extraction_available() -> bool:
     """
     Whether PyMuPDF can be imported, i.e. whether identity validation can run.
@@ -112,11 +134,7 @@ def pdf_text_extraction_available() -> bool:
     broken one. Without it every download is still checked for the `%PDF-`
     magic; what is lost is quarantining a file by its content.
     """
-    try:
-        import fitz  # noqa: F401
-    except ImportError:
-        return False
-    return True
+    return _pymupdf() is not None
 
 
 def extract_pdf_text(pdf_path: str, max_pages: int = 3, max_chars: int = 12000) -> tuple[str, str]:
@@ -126,13 +144,12 @@ def extract_pdf_text(pdf_path: str, max_pages: int = 3, max_chars: int = 12000) 
     PyMuPDF is optional at runtime; if it is missing, callers should treat
     validation as unavailable rather than as a hard failure.
     """
-    try:
-        import fitz  # type: ignore
-    except ImportError:
+    pymupdf = _pymupdf()
+    if pymupdf is None:
         return "", "PyMuPDF unavailable"
 
     try:
-        doc = fitz.open(pdf_path)
+        doc = pymupdf.open(pdf_path)
         try:
             chunks = []
             for page_no in range(min(max_pages, doc.page_count)):
