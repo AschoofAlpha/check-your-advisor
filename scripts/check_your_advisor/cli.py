@@ -26,14 +26,19 @@ Run without a subcommand to get `fetch` (kept for backwards compatibility).
 What the report will now turn a number into, and what it still will not:
 
 - `compare` ranks the corpora on its page by composite score, prints each
-  position with the count it was taken over, gives each corpus a star band, and
-  will say in a sentence which of two scored higher. All three were refused in
-  the previous round and have been reversed deliberately.
-- There is still no percentile and no quantile position — those need a reference
-  population and this toolkit holds none. There is still no letter tier: stars
-  are produced and A/B/C is not, which is a decision rather than an oversight.
-  There is still no fitted trend and no slope.
-- No ordering of *people*, anywhere. No roster is ever sorted by a count.
+  position with the count it was taken over, gives each corpus a star band and
+  the letter that relabels it, and will say in a sentence which of two scored
+  higher. All of these were refused in earlier rounds and have been reversed
+  deliberately.
+- `profile` ranks the people Section 2 names by first-author slots, in a second
+  table beside a roster that is itself never sorted by a count, and fits a slope
+  over Section 9's yearly counts with its interval beside it. And
+  `cite --percentile` places each citation count among every OpenAlex work
+  sharing its topic and year; Section 15 says how many were placed. Round four.
+- There is still no percentile and no quantile position of the composite score,
+  or of a corpus among the corpora loaded — those need a reference population
+  of researchers and this toolkit holds none. There is still no year-over-year
+  percentage change.
 
 `journal-worklist` is the front half of the journal-metric join and it makes no
 network request: impact factors and CAS partitions live in licensed databases
@@ -174,8 +179,11 @@ def parse_profile_args(argv: list[str] | None = None) -> argparse.Namespace:
         prog="check-your-advisor profile",
         description="从已有 papers_*.json 生成导师画像：发表记录反映出的「当这位 PI 的学生是什么样」",
         epilog="报告给一个 0-100 的综合分，并把权重表和星级分档边界原样印出来。"
-               "不给百分位（没有参照人群，算不出），不给 A/B/C 字母等级，不做趋势拟合，"
-               "也不给任何人排名次——名单永远不按数量排序。样本量下限是规范的一部分，不作为参数暴露。",
+               "第 2 节另起一张表，按一作名额给名单上的人排名次（名单本身不按数量重排）；"
+               "第 9 节只在年度点够多时才拟合斜率，并把区间印在同一句里；"
+               "跑过 cite --percentile 时，第 15 节说明有多少篇的引用数定位到了 OpenAlex 同领域同年的论文里。"
+               "综合分不给百分位（没有参照人群，算不出），报告里也没有 A/B/C 字母等级。"
+               "样本量下限是规范的一部分，不作为参数暴露。",
     )
     parser.add_argument("--config", help="JSON 配置文件路径（提供 author_identity、advisor 与 scoring.weights 配置）")
     parser.add_argument("--output-dir", help="报告输出目录（默认与 fetch 相同：pubmed_results）")
@@ -1978,8 +1986,8 @@ def cmd_profile(argv: list[str]):
         else:
             count = stars.get("stars")
             logger.info("综合分：%.1f / 100，来自 %d 个分项；星级 %s（%s 分档，边界印在报告里）。"
-                        "这是本语料自己的一个绝对值，不是名次——报告里没有百分位，没有 A/B/C 等级，"
-                        "也没有把任何一个人排在另一个人前面。",
+                        "这是本语料自己的一个绝对值，不是名次，也不是百分位——综合分没有参照人群；"
+                        "报告里没有 A/B/C 等级。给人排的名次只在第 2 节那张单独的表里，按一作名额排。",
                         score.get("score", 0.0), score.get("denominator", 0),
                         ("★" * count + "☆" * (stars.get("max_stars", 5) - count))
                         if count is not None else "未给出",
@@ -2172,9 +2180,10 @@ def cmd_compare(argv: list[str]):
                     ranking["min_ranked_corpora"])
     else:
         for row in ranking["ranked"]:
-            logger.info("第 %d / 共 %d 名：%s —— %.1f 分，%s，%d 个分项%s",
+            logger.info("第 %d / 共 %d 名：%s —— %.1f 分，%s（%s 档），%d 个分项%s",
                         row["rank"], row["of"], row["label"] or "(未命名)", row["score"],
                         "★" * (row["stars"] or 0) + "☆" * (5 - (row["stars"] or 0)),
+                        row.get("letter") or "无",
                         row["n_components"],
                         "，与 " + "、".join(row["tied_with"]) + " 并列" if row["tied_with"] else "")
     for row in ranking["unranked"]:
@@ -2186,11 +2195,14 @@ def cmd_compare(argv: list[str]):
         logger.info("%s", statement["statement"])
     # The last clause used to read「也没有给任何一个人排名」— printed directly under
     # 第 1 名 / 第 2 名 on rows labelled with people's names, which contradicted the
-    # ranks above it and the page's own footer. What is refused is narrower and is
-    # what the markdown says: no roster inside any report is ordered, and what is
-    # ranked here is corpora.
+    # ranks above it and the page's own footer. Its replacement said there was no
+    # A/B/C band and that no roster was ever ordered, and round four falsified
+    # both: the page prints a letter beside every star band, and Section 2 of each
+    # report ranks the people it names. What this line can still say is what the
+    # page footer says — what is ranked here is corpora, and the score has no
+    # percentile.
     logger.info("名次是这几份语料之间的位置，不是任何更大人群里的位置；换一份语料进来，名次就会变。"
-                "报告里没有百分位，没有 A/B/C 等级；排的是语料，任何一份报告里的人员名单都不按数量排序。")
+                "字母档就是星级换了个写法，分档边界相同；综合分没有百分位。这里排的是语料，不是人。")
     logger.info("对比结果: %s | %s", paths["markdown"], paths["json"])
     # A refused corpus keeps its row, so the page is still worth reading; the
     # exit code reports that at least one row carries a gate instead of numbers.

@@ -46,8 +46,8 @@ classifiers = [
 # The test suite proves the claim rather than restating
 # it: `python tests/run_all.py --block-third-party` installs an import hook that
 # makes requests, urllib3, pandas, numpy, matplotlib, fitz and openpyxl
-# unimportable, and 4902 of 4905 assertions still pass (35 files, measured
-# 2026-09-17). Adding a dependency here would make that suite a claim nobody
+# unimportable, and 4930 of 4933 assertions still pass (35 files, measured
+# 2026-10-06). Adding a dependency here would make that suite a claim nobody
 # checks. Both numbers are re-measured on every run and the run fails if this
 # comment has drifted; tests/test_declared_counts.py fails if the sentence above
 # them has.

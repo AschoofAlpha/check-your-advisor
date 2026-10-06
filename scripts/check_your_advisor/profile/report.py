@@ -15,19 +15,24 @@ apart cannot tell which one would change tomorrow:
 
 - **Printed.** Absolute values, each beside the denominator it was computed
   over. Citation counts, h-index, i10-index, median citations, one composite
-  score out of 100 with every input, weight and contribution beside it, and —
-  new in this round — the star band that score falls in (`ranking.star_rating`).
-  On the side-by-side page, a rank among the corpora actually on that page, and
-  a one-sentence statement of which of two corpora scored higher
-  (`ranking.rank_corpora`, `ranking.comparative_statement`).
-- **Still refused.** Percentile and quantile position, because there is no
-  reference population anywhere in this toolkit and one cannot be assembled from
-  the few corpora a user happened to load. Letter tiers A/B/C, refused by
-  decision — stars are produced and letters are not, and that split is
-  deliberate rather than an inconsistency to be tidied away. Fitted trends,
-  slopes and year-over-year percentage change, unchanged: a handful of
-  right-censored integer points do not support a slope. The current register is
-  `ranking.RANKING_EXCLUSIONS` and Section 16 prints it verbatim.
+  score out of 100 with every input, weight and contribution beside it, and the
+  star band that score falls in (`ranking.star_rating`). On the side-by-side
+  page, a rank among the corpora actually on that page, the letter that relabels
+  each star band (`ranking.letter_grade`), and a one-sentence statement of which
+  of two corpora scored higher (`ranking.rank_corpora`,
+  `ranking.comparative_statement`). Round four added three more: a ranking of
+  the people Section 2 names, by first-author slots, as a second table beside a
+  roster that is itself never re-sorted (`roles.rank_people`); a slope over
+  Section 9's yearly counts with its interval beside it, refused below
+  `trends.MIN_TREND_POINTS` (`trends.fit_trend`); and in Section 15, how many
+  citation counts were placed inside an external cell of OpenAlex works sharing
+  their topic and year (`impact_reference`).
+- **Still refused.** A percentile or quantile position of the composite score,
+  or of a corpus among the corpora loaded beside it, because there is no
+  reference population for either anywhere in this toolkit and one cannot be
+  assembled from the few corpora a user happened to load. Year-over-year
+  percentage change, unchanged: 3 papers to 5 is not "+67%". The current
+  register is `ranking.RANKING_EXCLUSIONS` and Section 16 prints it verbatim.
 - **Supplied by hand or absent.** Journal Impact Factor, JCR quartile and CAS
   partition are not shipped with this toolkit and are not fetched by it — those
   tables are licensed products and there is no crawler here. Section 18 joins
@@ -94,6 +99,7 @@ from . import metrics as M
 from .caveats import DROPPED_REGISTER, caveat
 from .impact import citation_metrics
 from .ranking import (
+    LETTER_BASIS,
     RANKING_EXCLUSIONS,
     RANK_METHOD,
     RANK_TIE_NOTE,
@@ -2839,9 +2845,12 @@ def _fmt_input(value: Any) -> str:
 
 _IMPACT_PROSE: tuple[str, ...] = (
     "Citation counts and the h-index are printed here as absolute values, each beside the number "
-    "of records it was computed over. No ordering is produced from them: no rank, no percentile, "
-    "no quantile position, no grade, no tier, no comparison with any other researcher. A value is "
-    "printed; a position is not.",
+    "of records it was computed over. Nothing is ordered by them: no rank, no grade, no tier, no "
+    "comparison with any other researcher. The one position this section involves is a different "
+    "quantity and sits in its own block below — where a paper's count falls among every OpenAlex "
+    "work sharing its topic and publication year, fetched only by `cite --percentile`. That is a "
+    "position among those works, never among researchers, and the cell is the same whichever "
+    "corpora were loaded beside this one.",
     "",
     "Three properties of these numbers that a reader has to carry with them:",
     "",
@@ -3188,9 +3197,10 @@ def _score_prose() -> list[str]:
     lines += [
         "",
         "**Refused by `profile.ranking`, which is where ordering is now done.** This is the "
-        "current register for anything that turns a score into a position. Stars are produced "
-        "and letter tiers are not; a rank among the corpora on a side-by-side page is produced "
-        "and a percentile is not. Both splits are deliberate and both are argued here rather "
+        "current register for anything that turns a score into a position. Stars are produced, "
+        "and on a side-by-side page so is a letter, which is the same five bands relabelled "
+        "rather than a second cut. A rank among the corpora on such a page is produced and a "
+        "percentile of the score is not. That split is deliberate, and it is argued here rather "
         "than left to be discovered.",
         "",
     ]
@@ -4042,9 +4052,11 @@ def render_markdown(report: dict[str, Any]) -> str:
 
     Section 16 emits one composite score out of 100 beside every input, weight
     and contribution that produced it, and the star band that score falls in
-    beside the band edges that decided it. It emits no percentile, no quantile
-    position and no letter grade, here or anywhere else, and it places no person
-    above any other person: the roster is still never ordered by a count.
+    beside the band edges that decided it. It emits no percentile or quantile
+    position of that score and no letter grade, here or anywhere else in this
+    report. The one place a person is placed above another is the second table
+    in Section 2, which ranks the people named by first-author slots; the roster
+    above it is still never ordered by a count.
     """
     title = f"# Observed publication pattern — {report['author_name'] or '(unnamed researcher)'}"
     if report["refused"]:
@@ -4111,10 +4123,11 @@ def write_report(report: dict[str, Any], output_dir: str | Path) -> dict[str, st
 # What did not move, and the reason it did not: there is still no percentile and
 # no quantile position, because a position inside a reference population needs a
 # reference population and the corpora here are the few somebody chose to load.
-# There is still no letter tier — stars are produced and letters are not, and
-# that is a decision rather than an oversight. There is still no fitted trend
-# and no slope. `ranking.RANKING_EXCLUSIONS` is the register and this page
-# prints it.
+# There is still no fitted trend and no slope on this page: Section 9 of each
+# corpus's own report fits one, and nothing ranked here reads it. The letter
+# beside each star band is round four's, and it is the same band relabelled
+# (`ranking.letter_grade`) rather than a second cut, so the two columns cannot
+# disagree. `ranking.RANKING_EXCLUSIONS` is the register and this page prints it.
 #
 # The one thing every rank on this page carries is the count it was taken over.
 # "First" means something very different at N=2 and at N=9, and a rank column
@@ -4243,6 +4256,7 @@ def build_comparison(
         item["rank"] = row.get("rank")
         item["ranked"] = bool(row.get("ranked"))
         item["stars"] = row.get("stars")
+        item["letter"] = row.get("letter")
         item["rank_of"] = row.get("of", ranking["n_ranked"])
         item["tied_with"] = list(row.get("tied_with") or [])
         item["unranked_reason"] = row.get("reason")
@@ -4302,6 +4316,16 @@ def _stars_cell(item: Mapping[str, Any]) -> str:
     return f"{'★' * int(count)}{'☆' * (STAR_MAX - int(count))} ({int(count)} of {STAR_MAX})"
 
 
+def _letter_cell(item: Mapping[str, Any]) -> str:
+    """The same band as `_stars_cell`, relabelled, or why there is none.
+
+    Read off the row `rank_corpora` returned rather than recomputed, because
+    `letter_grade` derives the letter and the star count in one call; a renderer
+    that worked one of them out again could print a pair that disagrees.
+    """
+    return item.get("letter") or "none"
+
+
 def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
     """
     The side-by-side page, ranked.
@@ -4317,9 +4341,10 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
     is stated on the page itself: a rank here is a position among the corpora
     somebody chose to load and nothing wider, it is printed with the count it
     was taken over, it says nothing about supervision, and it is not comparable
-    across fields no matter how sound the arithmetic is. Percentile, quantile
-    position and letter tiers are still not produced, and the register saying so
-    is printed at the foot of the page rather than summarised.
+    across fields no matter how sound the arithmetic is. The letter column is
+    the star column relabelled, printed with `ranking.LETTER_BASIS` beside it.
+    Percentile and quantile position are still not produced, and the register
+    saying so is printed at the foot of the page rather than summarised.
     """
     corpora = list(comparison.get("corpora") or [])
     labels = [item["label"] or "(unnamed)" for item in corpora]
@@ -4350,8 +4375,9 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
         "",
         f"Ties: {ranking.get('tie_note', RANK_TIE_NOTE)}",
         "",
-        "| # | corpus | score out of 100 | stars | source | records | components scored | state |",
-        "|---|---|---|---|---|---|---|---|",
+        "| # | corpus | score out of 100 | stars | letter | source | records | components scored "
+        "| state |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
     for item in corpora:
         label = item["label"] or "(unnamed)"
@@ -4379,11 +4405,13 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
             scored = f"{score.get('denominator', '?')} of {score.get('components_registered', '?')}"
         place = f"{item['rank']} of {item.get('rank_of', '?')}" if item.get("ranked") else "unplaced"
         parts.append(
-            f"| {place} | {label} | {value} | {_stars_cell(item)} | `{item['source']}` | {size} | "
-            f"{scored} | {state} |"
+            f"| {place} | {label} | {value} | {_stars_cell(item)} | {_letter_cell(item)} | "
+            f"`{item['source']}` | {size} | {scored} | {state} |"
         )
 
     parts += [
+        "",
+        f"Letters: {LETTER_BASIS}",
         "",
         f"Positions were taken over the {ranking.get('n_scored', ranking.get('n_ranked', 0))} "
         f"corpora that carried a score, "
@@ -4507,20 +4535,24 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
         "",
         "## What this page still does not contain",
         "",
-        "- No percentile and no quantile position. Those need a reference population; the corpora "
-        "here are the few somebody chose to load, and a position inside that set would move "
-        "whenever an unrelated corpus was added or dropped.",
-        "- No letter tier. Stars are produced and A/B/C is not — a decision, recorded here so a "
-        "later reader does not unify them and reverse a call they were not party to.",
-        "- No fitted trend, slope or year-over-year change. A rank is a position at one moment and "
-        "never a movement between two.",
-        "- No ordering of people. No roster on any corpus's own report is ever sorted by a count.",
+        "- No percentile and no quantile position of any score on this page. Those need a "
+        "reference population; the corpora here are the few somebody chose to load, and a "
+        "position inside that set would move whenever an unrelated corpus was added or dropped. "
+        "The citation percentiles behind Section 15 of a corpus's own report are a different "
+        "quantity: each paper's count placed among every OpenAlex work sharing its topic and "
+        "year, a population that does not depend on what was loaded here.",
+        "- No fitted trend, slope or year-over-year change, and nothing ranked here reads one. "
+        "Section 9 of each corpus's own report fits a slope with its interval beside it; a rank "
+        "is a position at one moment and never a movement between two.",
+        "- No ordering of people. What is ranked here is corpora. Section 2 of each corpus's own "
+        "report ranks the people it names by first-author slots, in a second table beside a "
+        "roster that is itself never sorted by a count.",
         "- No Journal Impact Factor, JCR quartile or CAS partition on this page. Those are joined "
         "per corpus from a table the reader fills in by hand, in Section 18 of each corpus's own "
         "report, with the edition and the retrieval date printed beside every number. They are "
         "not fetched, not shipped, and never enter the score ranked above.",
         "",
-        "The register behind the first three, verbatim:",
+        "The register behind the first two, verbatim:",
         "",
     ]
     for group in ("refused_by_design", "not_computable_here"):

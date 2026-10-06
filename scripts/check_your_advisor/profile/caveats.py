@@ -14,14 +14,18 @@ of them would look different tomorrow:
 
 - **Computed.** Citation counts, the h-index and one composite score out of 100
   under an exposed weight table are produced and written to disk, and on a
-  `compare` page so are a rank among the corpora loaded, a star band and a
-  sentence saying which of two corpora scored higher. They are not in this
-  register except where a line says outright that it moved.
-- **Refused.** A percentile or quantile position, a letter grade, and any fitted
-  trend or year-over-year percentage change. A better data source would not
-  change these answers, which is what makes them refusals — and in the
-  percentile's case there is no data source to improve, because nothing here
-  holds a reference population to sit inside.
+  `compare` page so are a rank among the corpora loaded, a star band, the letter
+  that relabels it and a sentence saying which of two corpora scored higher.
+  Round four added a ranking of people by first-author slots in Section 2, a
+  slope with its interval in Section 9, and citation counts placed inside an
+  external OpenAlex cell in Section 15. They are not in this register except
+  where a line says outright that it moved.
+- **Refused.** A percentile or quantile position of the composite score or of a
+  corpus among the corpora loaded, and year-over-year percentage change. A
+  better data source would not change these answers, which is what makes them
+  refusals — and in the percentile's case there is no data source to improve,
+  because nothing here holds a reference population of researchers to sit
+  inside.
 - **Supplied by hand, or not at all.** Journal Impact Factor, JCR quartile, CAS
   partition and the degree-thesis roster are joined from files the user fills in
   and passes on the command line. This toolkit defines their columns, says which
@@ -452,21 +456,38 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "people without a name per directory.",
     ),
     (
-        "Percentile, quantile position, letter grade",
-        "Still refused, for two reasons that are different and are kept apart on purpose. A "
-        "percentile or a quantile position needs a reference population, and nothing here holds "
-        "one: every normalisation anchor in `scoring` is a declared constant rather than a value "
-        "measured off a group of researchers, and no calculation sees more than the few corpora on "
-        "one page. So a percentile is uncomputable here rather than merely withheld — a statement "
-        "about where someone sits among researchers cannot be manufactured out of two or nine "
-        "files a user happened to load, and the rank that is printed says in its own text that it "
-        "is a position among exactly those files and nothing wider. A letter grade is the other "
-        "case, and it is refused by decision: stars are produced and letters are not. That split "
-        "between two coarsenings of one number is deliberate rather than an inconsistency waiting "
-        "to be tidied — a star band is printed beside the score it coarsens and the edges that "
-        "produced it, while a letter detaches from its scale on sight and travels as a verdict "
-        "about a person. Recorded here so that a later reader does not unify the two and reverse "
-        "a decision they were not party to.",
+        "Percentile, quantile position of the score — still dropped. Letter bands, citation "
+        "percentiles in an external cell — no longer dropped",
+        "Kept on one line so both reversals are visible rather than silent, and so is what did not "
+        "move. Still uncomputable rather than merely withheld: a percentile or a quantile position "
+        "of the composite score, or of this corpus among researchers, needs a reference population "
+        "of researchers, and nothing here holds one — every normalisation anchor in `scoring` is a "
+        "declared constant rather than a value measured off a group of researchers, and no "
+        "calculation sees more than the few corpora on one page. A statement about where someone "
+        "sits among researchers cannot be manufactured out of two or nine files a user happened to "
+        "load, and the rank that is printed says in its own text that it is a position among "
+        "exactly those files and nothing wider. What moved is narrower on both counts. `cite "
+        "--percentile` places each paper's citation count among every OpenAlex work sharing its "
+        "topic and publication year — a population that is the same whatever was loaded, which is "
+        "what lets it hold a position the loaded corpora cannot — and Section 15 prints how many "
+        "papers were placed and, for every one that was not, the named reason. And a letter is "
+        "printed beside the star band on a `compare` page. Rounds one to three refused "
+        "it by decision, on the argument that a letter detaches from its scale and travels as a "
+        "verdict about a person; round four reversed that decision on the user's instruction. The "
+        "letter is the star band relabelled, derived from one table so the two cannot disagree, "
+        "and `ranking.LETTER_BASIS` is printed beside it so the scale travels with it.",
+    ),
+    (
+        "Ordering people by a count — no longer dropped, and confined to one table",
+        "Rounds one to three ordered nobody: the counts were printed one line each and arranging "
+        "people by them was left to the reader, because arranging them turns a description into a "
+        "standing. That objection has not stopped being true; round four added the ordering on "
+        "the user's instruction and kept it in one place. Section 2 prints a second table ranking "
+        "the people it names by first-author slots, with ties sharing a rank and the size of the "
+        "roster printed beside the ranks (`roles.rank_people`). The roster itself is still never "
+        "re-sorted by a count — not in the Markdown, the HTML or the interactive control — so the "
+        "order a reader meets first is still one nobody's output can change, and no composite of "
+        "several counts is ever used to order a person.",
     ),
     (
         "Graduation rate, time to degree, attrition, \"students who left\"",
