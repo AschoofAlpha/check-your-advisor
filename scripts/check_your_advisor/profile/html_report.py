@@ -423,7 +423,7 @@ def _roster_cell(row: Mapping[str, Any], field: str) -> str:
             for label, flag in (("left", row.get("left_censored")), ("right", row.get("right_censored")))
             if flag
         ]
-        return ", ".join(marks) or en("none")
+        return en(", ").join(marks) or en("none")
     if field == "flags":
         return ", ".join(row.get("flags") or []) or "-"
     return _flat(row.get(field, ""))

@@ -10,6 +10,8 @@ MESSAGES = {
     ", ": "、",
     "; ": "；",
     "  ({notes})": "（{notes}）",
+    # C-YEAR, when every year bin is flagged and the counts are listed instead.
+    "{year}: {count}": "{year}：{count}",
     # Section 19: the year span after a cluster's record count.
     ", {low}": "，{low}",
     ", {low}–{high}": "，{low}–{high}",

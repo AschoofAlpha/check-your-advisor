@@ -74,7 +74,7 @@ def check_false(label: str, actual) -> None:
     check(label, bool(actual), False)
 
 
-HAN = re.compile(r"[一-鿿]")
+HAN = re.compile(r"[\u4e00-\u9fff]")
 
 
 # ============================================================
@@ -441,8 +441,11 @@ for label, built in reports.items():
           re.findall(r"\*[^\s*<>]{1,40}\*", page_text), [])
     # A separator the code writes between translated pieces — `", ".join`,
     # `f"({notes})"` — is English punctuation unless it goes through the catalog.
+    english_joins = re.compile(r"[\u4e00-\u9fff][,;] |\((?=[\u4e00-\u9fff])")
     check(f"{label}: ...with Chinese punctuation between translated pieces",
-          re.findall(r"[一-鿿][,;] |\((?=[一-鿿])", re.sub(r"`[^`]*`", "", chinese_md)), [])
+          english_joins.findall(re.sub(r"`[^`]*`", "", chinese_md)), [])
+    check(f"{label}: ...in the figures' captions and descriptions too",
+          english_joins.findall(page_text), [])
     check(f"{label}: the English report is unchanged by having been translated",
           report.render_markdown(built), english_md)
     check(f"{label}: both carry one JSON record", report.json_record(view), report.json_record(built))
