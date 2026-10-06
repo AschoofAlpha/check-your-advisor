@@ -335,10 +335,11 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-4949 assertions across 35 files, measured 2026-10-06 by the first command
-above — and that command re-measures it every run and fails if this sentence
-has drifted, which is why it is a number rather than a promise. The second run
-installs an import hook that
+4954 assertions across 35 files with PyMuPDF installed, 4951 without it,
+measured 2026-10-06 by the first command above. That command re-measures
+whichever of the two this machine can produce, on every run, and fails if this
+sentence has drifted, which is why they are numbers rather than promises. The
+second run installs an import hook that
 blocks `requests`, `urllib3`, `pandas`, `numpy`, `matplotlib`, `fitz` and
 `openpyxl` inside each test process. It is the only thing that keeps "no install
 needed" true rather than merely claimed: exactly three assertions behave

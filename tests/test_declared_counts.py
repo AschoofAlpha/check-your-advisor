@@ -32,6 +32,8 @@ Run: python tests/test_declared_counts.py
 from __future__ import annotations
 
 import ast
+import contextlib
+import io
 import json
 import os
 import re
@@ -469,6 +471,32 @@ check("all three declarations name the same assertion total"
       len({c["full"] for _n, _l, c in _found if "full" in c}), 1)
 check("all three declarations name the same file count",
       len({c["files"] for _n, _l, c in _found if "files" in c}), 1)
+check("all three declarations name the same total without PyMuPDF"
+      "  [make README.md, README.zh-CN.md and pyproject.toml agree]",
+      len({c["blocked"] for _n, _l, c in _found if "blocked" in c}), 1)
+check("each declaration states both totals, so either run can check it"
+      "  [a plain run without PyMuPDF can only check the total without it]",
+      sorted(n for n, _l, c in _found if not {"full", "blocked"} <= set(c)), [])
+
+# Which total a plain run is held to is read off its output, not guessed from
+# the machine: the runner looks for the line test_pdf_validation.py prints when
+# its real-PDF cases skip. Reword that line and every PyMuPDF-less plain run
+# goes back to failing against the total it cannot produce.
+check_true("test_pdf_validation.py still prints the skip line the runner reads"
+           "  [keep run_all.PDF_SKIP_MARKER and the [SKIP] print in step]",
+           run_all.PDF_SKIP_MARKER in (REPO / "tests" / "test_pdf_validation.py").read_text(
+               encoding="utf-8"))
+_files = next((c["files"] for _n, _l, c in _found if "files" in c), 0)
+_full = next((c["full"] for _n, _l, c in _found if "full" in c), 0)
+_without = next((c["blocked"] for _n, _l, c in _found if "blocked" in c), 0)
+with contextlib.redirect_stdout(io.StringIO()):
+    _plain_skipped = run_all.check_declared_counts(_without, _files, False, pdf_cases_skipped=True)
+    _plain_full = run_all.check_declared_counts(_without, _files, False, pdf_cases_skipped=False)
+    _plain_extra = run_all.check_declared_counts(_full, _files, False, pdf_cases_skipped=False)
+check("a plain run that skipped the PDF cases is held to the total without them",
+      _plain_skipped, True)
+check("...while a plain run that ran them is still held to the full total",
+      (_plain_full, _plain_extra), (_full == _without, True))
 
 # "Exactly three assertions behave differently" is the only sentence tying the
 # two runs together, and it is stated as a word in three files while the numbers
