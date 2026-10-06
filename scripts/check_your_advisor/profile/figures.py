@@ -165,7 +165,7 @@ def byline_year_chart(s7: dict[str, Any], s9: dict[str, Any] | None = None) -> d
     # with two records cannot look as tall as a lane with twenty.
     peak = max([1] + [count for bins in per_lane.values() for count in bins.values()])
 
-    lane_counts = ", ".join(
+    lane_counts = en(", ").join(
         en("{label} {count} of {denominator}", label=en(label), count=sum(per_lane[key].values()),
            denominator=denominator) for key, label in BYLINE_LANES
     )
@@ -395,7 +395,7 @@ def coauthor_network_chart(
             span = ""
             if cluster.get("year_range"):
                 first, last = cluster["year_range"]
-                span = f", {first}" if first == last else f", {first}–{last}"
+                span = en(", {low}", low=first) if first == last else en(", {low}–{high}", low=first, high=last)
             venue = (cluster["journals"][0]["journal"] if cluster.get("journals") else "")
             panel = [
                 rect(14.0 + panel_width * column_index + 4, panel_top + 2,
@@ -543,7 +543,7 @@ def activity_span_chart(s5: dict[str, Any]) -> dict[str, Any]:
                "is drawn in its place.",
                cohort=cohort, single_count=single_count)))
 
-    counted = ", ".join(en("{label} {count} of {cohort}", label=en(label), count=int(buckets.get(key, 0)),
+    counted = en(", ").join(en("{label} {count} of {cohort}", label=en(label), count=int(buckets.get(key, 0)),
                            cohort=cohort) for key, label in _SPAN_LANES)
     sub_lines = wrap(
         en("One dot per person in the cohort of {cohort}. Censoring by lane: "

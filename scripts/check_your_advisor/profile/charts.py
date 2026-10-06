@@ -208,8 +208,8 @@ def person_timeline_chart(
         # The count is printed because a mark covers a whole year, so counting marks
         # gives the wrong number. It never enters the sort (R5).
         name_text = en("{name}{marker} — n={n_appearances} records — {label}", name=row['name'], marker=marker, n_appearances=row['n_appearances'], label=label)
-        censoring = ", ".join(en(side) for side, flag in (("left", row.get("left_censored")),
-                                                      ("right", row.get("right_censored"))) if flag) or en("none")
+        censoring = en(", ").join(en(side) for side, flag in (("left", row.get("left_censored")),
+                                                          ("right", row.get("right_censored"))) if flag) or en("none")
         group = [tooltip(en("{name_text}; {first} to {last}; censoring {censoring}", name_text=name_text, first=first, last=last, censoring=censoring)),
                  text(14, y + 4, name_text, 11.0 if cells(name_text) <= 58 else 9.5)]
         if last > first:
@@ -468,7 +468,7 @@ def records_per_year_chart(s9: dict[str, Any], provenance: dict[str, Any] | None
                                    denominator=denominator))
     if len(flagged) == len(years):
         # A figure whose every mark is annotated as wrong is not a figure.
-        listing = "; ".join(f"{item['year']}: {item['count']}" for item in years)
+        listing = en("; ").join(en("{year}: {count}", year=item['year'], count=item['count']) for item in years)
         return _prose("C-YEAR", (
             en("Every year bin in this corpus is partial or subject to PubMed indexing "
                "lag ({n_flagged} of {n_years}), so the counts are printed instead of "
