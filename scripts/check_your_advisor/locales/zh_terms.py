@@ -6,6 +6,13 @@ MESSAGES = {
     " vs ": " 对 ",
     "{id} ({name})": "{id}（{name}）",
     "{label}: {unavailable}": "{label}：{unavailable}",
+    # Separators between translated items: a list, and the notes on a year's count.
+    ", ": "、",
+    "; ": "；",
+    "  ({notes})": "（{notes}）",
+    # Section 19: the year span after a cluster's record count.
+    ", {low}": "，{low}",
+    ", {low}–{high}": "，{low}–{high}",
     # Section 13's collapsed list when the report carries no count for it.
     "All record titles, verbatim, by year": "全部记录的题名，原样列出，按年份排列",
     # `theses.name_script`: the writing system a name is in.

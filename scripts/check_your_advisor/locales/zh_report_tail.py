@@ -80,7 +80,7 @@ MESSAGES = {
     '- IF 年份 present: {if_years}': '- 出现的「IF 年份」：{if_years}',
     '- 数据获取日期 span: {retrieved_on_range}': '- 「数据获取日期」的跨度：{retrieved_on_range}',
     'One row per journal per edition. Where a journal was checked against two editions both rows are here and neither wins:': '每本期刊每个版本一行。一本期刊对照过两个版本的，两行都列在这里，不以哪一行为准：',
-    '| journal (as PubMed records it) | papers | match | 版本来源 | 数据获取日期 | 影响因子 (年份) | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |': '| 期刊（PubMed 的记法） | 篇数 | 匹配方式 | 版本来源 | 数据获取日期 | 影响因子 (年份) | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |',
+    '| journal (as PubMed records it) | papers | match | 版本来源 | 数据获取日期 | 影响因子 (年份) | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |': '| 期刊（PubMed 的记法） | 篇数 | 匹配方式 | 版本来源 | 数据获取日期 | 影响因子（年份） | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |',
     '| (no record in this corpus carries a journal string) | {papers_without_journal} | - | - | - | - | - | - | - | - | - |': '| （这份语料里没有一条记录带期刊字符串） | {papers_without_journal} | - | - | - | - | - | - | - | - | - |',
     '- journals in this corpus that the table does not contain: {n_unmatched_journals} — {unmatched_journals}': '- 这份语料里有、而表里没有的期刊：{n_unmatched_journals} 本——{unmatched_journals}',
     '- journal names whose abbreviation fits more than one table entry, left unmatched rather than resolved: {n_ambiguous_journals} — {items}': '- 缩写能对上表中不止一个条目的期刊名，留作未匹配，不做裁定：{n_ambiguous_journals} 个——{items}',

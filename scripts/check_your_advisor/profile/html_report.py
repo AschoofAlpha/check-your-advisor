@@ -126,6 +126,12 @@ COLLAPSE_TABLE_ROWS = 15
 
 _IMAGE_LINE = re.compile(r"^!\[[^\]]*\]\([^)]*\)$")
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
+# One asterisk each side, hugging the text inside. A Latin letter or digit
+# against the outside of either asterisk means it is not emphasis — `X*[Author]`,
+# `papers_*.json` — but a Chinese character does not, because Chinese puts no
+# space before `*确实*` the way English does before `*did*`. The text inside may
+# not cross a tag, so two asterisks in neighbouring <code> spans never pair up.
+_EMPHASIS = re.compile(r"(?<![*A-Za-z0-9_])\*(?![\s*])([^*\n<>]+?)(?<![\s*])\*(?![*A-Za-z0-9_])")
 _CODE = re.compile(r"`([^`]+)`")
 _NON_SLUG = re.compile(r"[^a-z0-9]+")
 
@@ -160,14 +166,17 @@ def _slug(value: str) -> str:
 
 def _inline(text: str) -> str:
     """
-    The inline Markdown the report bodies actually use: `code` and **bold**.
+    The inline Markdown the report bodies actually use: `code`, **bold** and
+    *emphasis*. Emphasis was missing, so the four sentences that use it printed
+    their asterisks on the page while the Markdown beside it showed italics.
 
-    Escaping runs first, so a title containing `<b>` becomes text; the two
-    patterns below can only match characters the report renderer put there.
+    Escaping runs first, so a title containing `<b>` becomes text; the patterns
+    below can only match characters the report renderer put there.
     """
     out = _esc(text)
     out = _CODE.sub(r"<code>\1</code>", out)
-    return _BOLD.sub(r"<strong>\1</strong>", out)
+    out = _BOLD.sub(r"<strong>\1</strong>", out)
+    return _EMPHASIS.sub(r"<em>\1</em>", out)
 
 
 # --- report body parsing --------------------------------------------------
