@@ -1,0 +1,49 @@
+# The two commands the README tells a contributor to run, on every push to main
+# and every pull request. The suite checks the repository's own claims — the
+# declared assertion totals, SKILL.md's frontmatter, the version written in three
+# places — so a change that falsifies a sentence in the docs fails here, before
+# a release, instead of on somebody's machine after one.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  stdlib-only:
+    # The install the README promises: a bare interpreter with nothing added.
+    # The plain run skips the three real-PDF cases here and is held to the
+    # total declared for a run without them.
+    name: stdlib only, Python ${{ matrix.python }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: python tests/run_all.py
+      - run: python tests/run_all.py --block-third-party
+
+  with-extras:
+    # The only job that measures the full total, because the three real-PDF
+    # cases need PyMuPDF. Installing the package with its extras also builds it,
+    # which is the packaging check a release would otherwise be the first to run.
+    name: with extras, Python 3.13
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - run: python -m pip install ".[all]"
+      - run: python tests/run_all.py
