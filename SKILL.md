@@ -1,8 +1,8 @@
 ---
 name: check-your-advisor
-description: 查导师：把 PubMed 里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。不打分给结论，只给证据。Report what a principal investigator's publication record shows about being their student, from PubMed. Answers who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern. Every count is printed with its denominator. Citation counts, an h-index and one composite score out of 100 are computed and written to disk, the score under a flat default weight table the report prints verbatim and the user can edit. Several corpora can be laid side by side and are ranked there by that score, each with a star band and, for adjacent pairs, one sentence saying which scored higher — every rank printed with the number of corpora it was taken among. A letter band sits beside the star band on the compare page, both being the same score coarsened on the same boundaries. Section 9 fits a slope over the yearly counts and prints the confidence interval and the number of points in the same sentence, refusing to fit at all below four points. Section 2 ranks the people it names by first-author slots, as a second table beside the roster rather than by reordering it, with the size of the roster printed beside the ranks. With `cite --percentile` it also asks OpenAlex where each citation count falls among every work sharing that paper's topic and publication year, and prints the position with the size of that cell beside it; papers it cannot place carry one of seven named reasons and never a low position. It still produces no position among the corpora a user happened to load, which is a different quantity and remains uncomputable. Impact factor, JCR quartile, CAS partition and the list of this advisor's graduates are joined from CSV tables the user fills in by hand and passes in — the schemas, the worklist and the join are here, the scraping of a subscription database is not. Nine verbs — `harvest` collects one named researcher's papers and separates them from same-name authors, and can also ask the free keyless OpenAlex API which author id this name belongs to (listing every candidate rather than picking one) and merge that author's OpenAlex records in as a second source, deduplicated on DOI then PMID then title and year, with every record marked with which sources hold it; `cite` fetches citation counts into their own dated file; `journal-worklist` writes out the journals this corpus actually uses so they can be looked up; `journal-risk` collects DOAJ indexing status and Crossref metadata coverage for those journals from keyless public APIs and prints them as dated statements, never as a rating — nothing here calls a journal predatory; `profile` turns that corpus into the report, with seven inline-SVG figures and an optional PDF copy produced by whatever converter the machine already has; `compare` puts several corpora on one page; `diff` compares two harvests of one advisor and splits every "in one and not the other" count on whether the search window moved between them, because a wider window looks exactly like growth and is not; `download` re-runs only the PDF stage over an existing corpus; `clean-cache` drops expired failed downloads from the cache.
-triggers: check my advisor, evaluate a PI, what is this lab like, should I join this lab, advisor publication record, lab profile, PI profile, first-author slots, time to first author, compare two advisors, rank two advisors, PI citation counts, journal impact factor table, JCR quartile, CAS partition, advisor graduate list, 查导师, 选导师, 对比两个导师, 导师打分, 这个老板怎么样, 实验室发表记录, 期刊分区, 影响因子, 中科院分区, 毕业名单, 学位论文
-tools: Read, Bash, Grep, Glob
+description: 查导师：把 PubMed 里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。只给证据，不替你下结论。Report what a principal investigator's publication record shows about being their student, from PubMed and optionally OpenAlex — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern, every count printed with its denominator. Also computes citation counts, an h-index, citation percentiles in OpenAlex topic-year cells, a slope with its interval, and a 0-100 composite score under an editable weight table; `compare` ranks corpora with star and letter bands. Journal impact factor, JCR quartile, CAS partition, the graduate roster and student evaluations are joined from CSV tables the user fills in by hand, and nothing is scraped. Nine verbs — `harvest`, `cite`, `journal-worklist`, `journal-risk`, `profile`, `compare`, `diff`, `download`, `clean-cache`. It never says whether an advisor is good.
+when_to_use: Use when someone is choosing or vetting a PhD or master's advisor or lab, asks what a PI's record shows, or wants advisors compared, ranked or scored. Typical requests include check my advisor, evaluate a PI, what is this lab like, should I join this lab, first-author slots, compare two advisors, 查导师, 选导师, 对比两个导师, 导师打分, 这个老板怎么样, 实验室发表记录, 期刊分区, 影响因子, 中科院分区, 毕业名单, 学位论文.
+allowed-tools: Bash(python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" *)
 model: inherit
 ---
 
@@ -245,6 +245,18 @@ makes the report say the flag did it, so a skipped lookup can never be misread a
 a researcher with no citations. Without a citation file you lose Section 15 and
 two of the six score components; Sections 1 to 13 are unchanged.
 
+`cite --percentile` asks OpenAlex one more question per paper: where its count
+falls among every work sharing that paper's primary topic and publication year.
+It writes `impact_reference_<timestamp>.json` beside the citation file, never
+into the corpus, and `profile` picks up the newest one on its own. The position
+is the share of that cell cited strictly fewer times, so an uncited paper sits
+at 0.0 rather than at the top of the zero-citation tie, and every placed record
+carries a `basis` sentence naming the cell, its size and the tie block. A paper
+that could not be placed carries a named reason and is never a low position;
+Section 15 prints how many were placed and why each of the others was not. It
+is off by default because it costs one extra request per paper and one per
+topic-year.
+
 The score's weight table lives in the config file at `scoring.weights`, one
 entry per component: `lead_slot_share`, `people_with_lead_slot`, `time_to_lead`,
 `records_per_year`, `citation_h_index`, `citation_median`. All six default to
@@ -337,6 +349,30 @@ nowhere to put that caveat, so it is not written at all in that case.
 
 `compare` joins no journal table and no thesis roster. Those are per-corpus and
 live in each corpus's own `profile` report.
+
+### The same advisor six months later — `diff`
+
+```bash
+python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" diff ./record-2026-03 ./record-2026-09
+```
+
+Older directory first. It reports what is in one corpus and not the other, who
+appears for the first time, and where the first-author slots went; `--out`
+writes the full difference as JSON.
+
+**Read the window block before any count.** If the two harvests asked about
+different year ranges, "7 more papers" may be nothing but two extra years of
+searching, which is the window moving and not the record growing. So every
+one-sided count is split three ways: inside the years both harvests asked about,
+inside years only one of them asked about, and undated. When either corpus did
+not record its window, `diff` says the two cannot be compared rather than
+substituting the span the corpus happens to cover.
+
+It reports membership and never a cause. A paper in the older corpus and not the
+newer one may have been retracted, the search term or the identity evidence may
+differ, or the databases may simply have answered differently on the two days.
+All four are listed side by side, unordered; the tool cannot tell them apart and
+does not guess.
 
 ## Three tables you fill in by hand
 
@@ -549,6 +585,24 @@ this advisor's student, or that two posts are two people. And an advisor with
 twenty years of students is not the same supervisor throughout — `评价年份` is
 optional because most sources do not carry it, and rows without it cannot be
 placed in time at all, so the printed span covers only the rows that can.
+
+### Chinese-language records — `profile --chinese-records`
+
+A fourth table, and not like the three above: they each feed one section, while
+this one is merged into the corpus, so every number in the report moves. That is
+the point of it. A PubMed-only harvest of an advisor who publishes in Chinese
+journals can miss most of their output — 12 indexed papers against 40 in Chinese
+core journals makes the output, first-author and turnover figures statements
+about a quarter of the work, and nothing on the page shows it.
+
+Export the records from CNKI or 万方 by hand. Required columns: `篇名`, `作者`,
+`作者拼音`, `期刊`, `发表年份`, `数据来源`, `数据获取日期`; a missing one is named
+at load. `作者拼音` decides whether the table is usable at all: without it the
+advisor cannot be located in a Chinese byline, so the record still counts toward
+output per year but holds no byline position, and each such row is reported.
+Deduplication against the PubMed corpus has one tier only, normalised title plus
+year, so a cross-source match is reported as *suspected* and listed pair by
+pair, and the three denominators are printed separately rather than summed.
 
 ## The corpus decides everything — configure identity first
 

@@ -192,6 +192,82 @@ check("SKILL.md names every verb"
 
 
 # ======================================================================
+# SKILL.md's frontmatter, as Claude Code reads it
+# ======================================================================
+#
+# The one block in this repository whose reader is not a person. Claude Code
+# drops a frontmatter key it does not recognise without a word, and truncates the
+# listing a model chooses skills from. For two releases `triggers:` held every
+# trigger phrase (查导师, 选导师, 影响因子 ...) and reached no model, `tools:` — a
+# subagent field — granted nothing, and a 3,287-character description was cut
+# mid-word after its percentile sentence, so the listing never mentioned impact
+# factor, CAS partition or the verbs.
+
+print("\n[skill] SKILL.md's frontmatter, as Claude Code reads it")
+
+# https://code.claude.com/docs/en/skills, "Frontmatter reference".
+SKILL_FIELDS = frozenset({
+    "name", "description", "when_to_use", "argument-hint", "arguments",
+    "disable-model-invocation", "user-invocable", "allowed-tools",
+    "disallowed-tools", "model", "effort", "context", "agent", "background",
+    "hooks", "paths", "shell", "metadata", "license", "compatibility",
+})
+# Same page: "the combined `description` and `when_to_use` text is truncated at
+# 1,536 characters in the skill listing". Counted in UTF-16 units, which is how
+# the listing's JavaScript counts and which equals Python's len for Chinese.
+SKILL_LISTING_CAP = 1536
+# The first character of a YAML plain scalar may not be one of these, and a plain
+# scalar may not contain ": " or " #". Checked by hand because the suite imports
+# no YAML parser — one installed on some machines and not others would change
+# what the suite counts.
+_YAML_INDICATORS = "-?:,[]{}#&*!|>'\"%@`"
+
+
+def _len16(value: str) -> int:
+    return len(value.encode("utf-16-le")) // 2
+
+
+_skill_lines = text("SKILL.md").splitlines()
+check_true("SKILL.md opens with a frontmatter block", _skill_lines[:1] == ["---"])
+_fm_end = _skill_lines.index("---", 1) if "---" in _skill_lines[1:] else 0
+_fm = [(line.partition(":")[0], line.partition(":")[2].strip())
+       for line in _skill_lines[1:_fm_end]]
+check("every frontmatter key sits on one line at column 0"
+      "  [keep each value on one line; this block is read without a YAML parser]",
+      [key for key, _value in _fm if not key or key[0].isspace() or not _value], [])
+check("every frontmatter key is one Claude Code reads"
+      "  [see SKILL_FIELDS: an unknown key is dropped silently]",
+      sorted(key for key, _value in _fm if key not in SKILL_FIELDS), [])
+check("no frontmatter key appears twice",
+      sorted({key for key, _value in _fm if [k for k, _v in _fm].count(key) > 1}), [])
+check("every frontmatter value is a YAML plain scalar that reads back as written"
+      "  [no ': ' and no ' #' inside a value, and no indicator character first]",
+      [key for key, value in _fm if value and (
+          ": " in value or " #" in value or value[0] in _YAML_INDICATORS)], [])
+_fields = dict(_fm)
+_listing = _len16(_fields.get("description", "")) + _len16(_fields.get("when_to_use", ""))
+check_true(f"description + when_to_use fit the {SKILL_LISTING_CAP}-character skill listing"
+           f" (now {_listing})  [shorten SKILL.md's description; the detail belongs in its body]",
+           0 < _listing <= SKILL_LISTING_CAP)
+
+# The pre-approval matches command text as written, quotes included, so it is
+# only worth having while it is spelled exactly the way SKILL.md tells a model to
+# run the tool. A rule naming a script that moved, or a body that switched to
+# `python3`, would fail to match and nothing would say so.
+_rules = re.findall(r"Bash\((.*?) \*\)", _fields.get("allowed-tools", ""))
+check_true("allowed-tools pre-approves the skill's own entry point", _rules)
+for _rule in _rules:
+    _script = re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\s]+)", _rule)
+    check_true(f"the script {_rule!r} pre-approves exists in this repository",
+               _script and (REPO / _script.group(1)).is_file())
+    _invocations = [line.strip() for line in _skill_lines[_fm_end:]
+                    if _script and _script.group(1) in line and line.strip().startswith("python")]
+    check(f"every SKILL.md command running {_script.group(1) if _script else '?'} is spelled the"
+          f" way the rule matches  [edit the command or the rule; they must agree]",
+          [line for line in _invocations if not line.startswith(_rule + " ")], [])
+
+
+# ======================================================================
 # Warning placement: prose that names section numbers
 # ======================================================================
 
