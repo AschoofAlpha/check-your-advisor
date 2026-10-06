@@ -67,6 +67,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
+from .i18n import lazy_en
+
 # The sample-size floors live in `profile.metrics` and are read from there rather
 # than retyped, for the reason `config.py` gives about the weight table: a second
 # copy of a threshold is how two modules drift apart without anyone noticing.
@@ -792,20 +794,23 @@ def _select_advisor_rows(
         return matched, "matched", None
     distinct = {str(row.get("advisor") or "").strip() for row in rows if str(row.get("advisor") or "").strip()}
     if not rows:
-        return [], "refused", "the thesis roster is empty, so no graduate can be attributed to anyone."
+        return [], "refused", lazy_en("the thesis roster is empty, so no graduate can be attributed to anyone.")
     if len(distinct) == 1:
         only = next(iter(distinct))
         return list(rows), "unverified_single_advisor", (
-            f"no supervisor cell joined to pi_name {pi_name!r}, but the file carries exactly one "
-            f"supervisor ({only!r}), so every row was taken as theirs. If that export was queried "
-            "for someone else, every count below is that other person's."
+            lazy_en("no supervisor cell joined to pi_name {pi_name!r}, but the file carries "
+                    "exactly one supervisor ({only!r}), so every row was taken as theirs. If "
+                    "that export was queried for someone else, every count below is that other "
+                    "person's.",
+                    pi_name=pi_name, only=only)
         )
     return [], "refused", (
-        f"no supervisor cell joined to pi_name {pi_name!r} and the file carries "
-        f"{len(distinct)} different supervisors, so there is no non-arbitrary way to say which "
-        f"graduates are this PI's. Supervisors seen: {', '.join(sorted(distinct)[:12])}"
-        + (" ..." if len(distinct) > 12 else "")
-        + ". Fix pi_name, or add an 学生姓名拼音 / 导师姓名拼音 column."
+        lazy_en("no supervisor cell joined to pi_name {pi_name!r} and the file carries "
+                "{n_distinct} different supervisors, so there is no non-arbitrary way to "
+                "say which graduates are this PI's. Supervisors seen: {distinct}. Fix "
+                "pi_name, or add an 学生姓名拼音 / 导师姓名拼音 column.",
+                pi_name=pi_name, n_distinct=len(distinct),
+                distinct=', '.join(sorted(distinct)[:12]) + (" ..." if len(distinct) > 12 else ""))
     )
 
 
@@ -1003,10 +1008,11 @@ def reconcile_roster(
                 "candidates": [],
                 "incomparable_pubmed_people": incomparable,
                 "note": (
-                    f"this name is written in {name_script(graduate['student'])} script and "
-                    f"{incomparable} PubMed "
-                    f"{'person' if incomparable == 1 else 'people'} could not be compared with "
-                    "it. Add a student_latin (学生姓名拼音) column to decide this row."
+                    lazy_en("this name is written in {name_script} script and {incomparable} PubMed "
+                            "{value} could not be compared with it. Add a student_latin (学生姓名拼音) "
+                            "column to decide this row.",
+                            name_script=lazy_en(name_script(graduate['student'])), incomparable=incomparable,
+                            value=lazy_en('person') if incomparable == 1 else lazy_en('people'))
                 ),
             })
         else:
@@ -1031,8 +1037,9 @@ def reconcile_roster(
                 "reason": "ambiguous",
                 "candidates": [row["pubmed_name"]],
                 "note": (
-                    f"PubMed person {row['pubmed_name']!r} was matched by more than one graduate: "
-                    + ", ".join(sorted(claimed_by[matched_person_index[row['student']]]))
+                    lazy_en("PubMed person {pubmed_name!r} was matched by more than one graduate: "
+                            "{graduates}", pubmed_name=row['pubmed_name'],
+                            graduates=", ".join(sorted(claimed_by[matched_person_index[row['student']]])))
                 ),
             })
 
@@ -1061,22 +1068,27 @@ def reconcile_roster(
 
     reasons: list[str] = []
     if advisor_filter == "refused":
-        reasons.append(advisor_note or "no rows could be attributed to this PI")
+        reasons.append(advisor_note or lazy_en("no rows could be attributed to this PI"))
     if graduates_total == 0:
-        reasons.append("no graduate could be attributed to this PI, so there is nothing to divide")
+        reasons.append(lazy_en("no graduate could be attributed to this PI, so there is nothing to divide"))
     elif graduates_total < MIN_N_AGGREGATE:
         reasons.append(
-            f"{graduates_total} graduates on record (floor {MIN_N_AGGREGATE}); the names are "
-            "printed instead of a share"
+            lazy_en("{graduates_total} graduates on record (floor {min_n_aggregate}); the "
+                    "names are printed instead of a share",
+                    graduates_total=graduates_total, min_n_aggregate=MIN_N_AGGREGATE)
         )
     if graduates_total and unresolved_share > MAX_UNRESOLVED_SHARE:
         reasons.append(
-            f"{unresolved} of {graduates_total} graduates could not be decided against the PubMed "
-            f"roster ({unresolved_share:.0%}, ceiling {MAX_UNRESOLVED_SHARE:.0%}). The complement "
-            "of an undecided majority is not a measurement"
-            + (", and this is what a Chinese export joined against romanised bylines looks like: "
-               "add a student_latin (学生姓名拼音) column"
-               if any(row.get("reason") == "undecidable_script" for row in review) else "")
+            lazy_en("{unresolved} of {graduates_total} graduates could not be decided against "
+                    "the PubMed roster ({unresolved_share:.0%}, ceiling "
+                    "{max_unresolved_share:.0%}). The complement of an undecided majority is "
+                    "not a measurement{script_hint}",
+                    unresolved=unresolved, graduates_total=graduates_total,
+                    unresolved_share=unresolved_share, max_unresolved_share=MAX_UNRESOLVED_SHARE,
+                    script_hint=lazy_en(", and this is what a Chinese export joined against "
+                                        "romanised bylines looks like: add a student_latin "
+                                        "(学生姓名拼音) column")
+                    if any(row.get("reason") == "undecidable_script" for row in review) else "")
         )
     suppressed = bool(reasons)
 
@@ -1111,9 +1123,11 @@ def reconcile_roster(
             None if suppressed else percent(len(without_record), graduates_total)
         ),
         "share_basis": (
-            "share of graduates on record with no paper in the PubMed corpus; a share exists only "
-            f"at n >= {MIN_N_PERCENT} and never at all when the result is suppressed. It is not a "
-            "graduation rate and not an attrition rate — neither has an observable denominator."
+            lazy_en("share of graduates on record with no paper in the PubMed corpus; a share "
+                    "exists only at n >= {min_n_percent} and never at all when the result is "
+                    "suppressed. It is not a graduation rate and not an attrition rate — "
+                    "neither has an observable denominator.",
+                    min_n_percent=MIN_N_PERCENT)
         ),
         "unresolved_share": unresolved_share,
         "max_unresolved_share": MAX_UNRESOLVED_SHARE,

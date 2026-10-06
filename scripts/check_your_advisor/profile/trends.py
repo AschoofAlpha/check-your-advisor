@@ -69,6 +69,8 @@ import math
 from collections.abc import Mapping, Sequence
 from typing import Any
 
+from ..i18n import lazy_en, lazy_join
+
 __all__ = [
     "CONFIDENCE_LEVEL",
     "MIN_DEGREES_OF_FREEDOM",
@@ -289,25 +291,27 @@ def _result(**fields: Any) -> dict[str, Any]:
 def _refusal_basis(n: int, unit: str) -> tuple[str, str]:
     """(reason, printable sentence) for a series below the floor. Both, always."""
     if n == 0:
-        why = "the series is empty, so there is nothing to fit"
+        why = lazy_en("the series is empty, so there is nothing to fit")
     elif n == 1:
-        why = "a single point has no direction"
+        why = lazy_en("a single point has no direction")
     elif n == 2:
         why = (
-            "exactly one line passes through two points, leaving no residual to estimate an "
-            "interval from, so the slope would arrive with no uncertainty attached to it"
+            lazy_en("exactly one line passes through two points, leaving no residual to estimate an "
+                    "interval from, so the slope would arrive with no uncertainty attached to it")
         )
     else:
         why = (
-            f"the residual scatter would rest on {n - 2} degree(s) of freedom and the interval "
-            "would run to several times the slope"
+            lazy_en("the residual scatter would rest on {value} degree(s) of freedom and the "
+                    "interval would run to several times the slope",
+                    value=n - 2)
         )
     reason = (
-        f"{n} annual point(s) of {unit}, below the floor of {_floor()}: {why}"
+        lazy_en("{n} annual point(s) of {unit}, below the floor of {floor}: {why}", n=n, unit=lazy_en(unit), floor=_floor(), why=why)
     )
     sentence = (
-        f"Not fitted: {reason}. The points themselves are in this result; the slope is not, "
-        "because there is no honest interval to print beside it."
+        lazy_en("Not fitted: {reason}. The points themselves are in this result; the slope "
+                "is not, because there is no honest interval to print beside it.",
+                reason=lazy_en(reason))
     )
     return reason, sentence
 
@@ -335,43 +339,46 @@ def _fit_basis(
     spans zero — so the slope cannot travel without them.
     """
     span = (
-        f"{first}-{last}, missing {', '.join(str(year) for year in gaps)}"
-        if gaps else f"{first}-{last}, no missing years"
+        lazy_en("{first}-{last}, missing {items}", first=first, last=last, items=', '.join(str(year) for year in gaps))
+        if gaps else lazy_en("{first}-{last}, no missing years", first=first, last=last)
     )
-    ratio = f", {width / abs(slope):.1f}x the slope itself" if slope else ""
+    ratio = lazy_en(", {value:.1f}x the slope itself", value=width / abs(slope)) if slope else ""
     parts = [
-        f"Least-squares fit over {n} annual points ({span}): slope {slope:+.2f} {unit} per year, "
-        f"{CONFIDENCE_LEVEL:.0%} interval {lower:+.2f} to {upper:+.2f} (width {width:.2f}{ratio})."
+        lazy_en("Least-squares fit over {n} annual points ({span}): slope {slope:+.2f} "
+                "{unit} per year, {confidence_level:.0%} interval {lower:+.2f} to "
+                "{upper:+.2f} (width {width:.2f}{ratio}).",
+                n=n, span=span, slope=slope, unit=lazy_en(unit), confidence_level=CONFIDENCE_LEVEL, lower=lower, upper=upper, width=width, ratio=ratio)
     ]
     if exact:
         parts.append(
-            "The points sit exactly on the line, so the interval has zero width. That is a "
-            "property of this many integer counts falling in a row, not evidence that the slope "
-            "is known precisely."
+            lazy_en("The points sit exactly on the line, so the interval has zero width. That is a "
+                    "property of this many integer counts falling in a row, not evidence that the slope "
+                    "is known precisely.")
         )
     elif excludes_zero:
         parts.append(
-            "The interval excludes zero, which is the most this many points can say and is not a "
-            "statement about any cause."
+            lazy_en("The interval excludes zero, which is the most this many points can say and is not a "
+                    "statement about any cause.")
         )
     else:
         parts.append(
-            "The interval spans zero, so these points are as consistent with no trend at all as "
-            "with the slope printed above."
+            lazy_en("The interval spans zero, so these points are as consistent with no trend at all as "
+                    "with the slope printed above.")
         )
     if censored:
         parts.append(
-            f"Year(s) {', '.join(str(year) for year in censored)} were flagged partial or "
-            "indexing-lag by the caller and were fitted anyway, at the caller's choice: those "
-            "bins are undercounted, so a slope that leans on them leans on when the data was "
-            "pulled."
+            lazy_en("Year(s) {items} were flagged partial or indexing-lag by the caller and "
+                    "were fitted anyway, at the caller's choice: those bins are undercounted, "
+                    "so a slope that leans on them leans on when the data was pulled.",
+                    items=', '.join(str(year) for year in censored))
         )
     parts.append(
-        f"{_floor()} points is the floor this module will fit at, and n={n} is not a "
-        "sample size at which a slope means much; the interval is the part of this line worth "
-        "reading."
+        lazy_en("{floor} points is the floor this module will fit at, and n={n} is not a "
+                "sample size at which a slope means much; the interval is the part of this "
+                "line worth reading.",
+                floor=_floor(), n=n)
     )
-    return " ".join(parts)
+    return lazy_join(parts)
 
 
 # ------------------------------------------------------------------

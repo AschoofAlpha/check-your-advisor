@@ -87,6 +87,7 @@ from typing import Any
 # on the same pair of names. `_compare_names` and `_comparable` are private to
 # `theses`, and imported anyway for that reason — the same call `openalex.py`
 # makes when it imports `_MARK_OPENALEX` rather than retyping the string.
+from .i18n import lazy_join, lazy_zh, zh
 from .theses import _comparable, _compare_names, name_script
 
 logger = logging.getLogger(__name__)
@@ -514,9 +515,8 @@ def _decode(path: Path) -> tuple[str, str]:
         except UnicodeDecodeError:
             continue
     raise ChineseRecordError(
-        f"中文题录表无法解码: {path}（已尝试 {'、'.join(ENCODINGS)}）。"
-        "请在 Excel 里另存为 UTF-8 CSV 后重试。"
-        "再猜第三种编码只会把这张表赖以对照的人名弄坏，所以这里不猜。"
+        lazy_zh("中文题录表无法解码: {path}（已尝试 {encodings}）。请在 Excel 里另存为 UTF-8 CSV 后重试。再猜第三种编码只会把这张表赖以对照的人名弄坏，所以这里不猜。",
+                path=path, encodings=", ".join(ENCODINGS))
     )
 
 
@@ -538,30 +538,32 @@ def _header_map(header: Sequence[str], path: Path) -> tuple[dict[int, str], list
             continue
         if key in seen:
             raise ChineseRecordError(
-                f"中文题录表表头有两列都对应字段 {key}: 第 {seen[key] + 1} 列与"
-                f"第 {position + 1} 列（{path}）。请删掉其中一列后重试。"
+                lazy_zh("中文题录表表头有两列都对应字段 {key}: 第 {value} 列与第 {value_2} 列（{path}）。请删掉其中一列后重试。",
+                        key=key, value=seen[key] + 1, value_2=position + 1, path=path)
             )
         seen[key] = position
         mapping[position] = key
 
-    found = "、".join(_clean(cell) for cell in header if _clean(cell)) or "(无)"
+    found = lazy_join([_clean(cell) for cell in header if _clean(cell)], lazy_zh("、")) or lazy_zh("(无)")
     missing = [key for key in REQUIRED_FIELDS if key not in seen]
     if missing:
-        wanted = "、".join(f"{_BY_KEY[k].zh}（或 {_BY_KEY[k].en}）" for k in missing)
-        why = ""
+        wanted = lazy_join([lazy_zh("{zh}（或 {en}）", zh=_BY_KEY[k].zh, en=_BY_KEY[k].en) for k in missing], lazy_zh("、"))
+        reasons = []
         if {"source_db", "retrieved_on"} & set(missing):
-            why += (
+            reasons.append(lazy_zh(
                 "缺数据来源或数据获取日期时，表里每一条题录过后都无法追溯是从哪个库、"
                 "哪一天导出来的，因此不接受这张表——这与期刊表缺版本来源是同一条规矩。"
-            )
+            ))
         if "authors_pinyin" in missing:
-            why += (
+            reasons.append(lazy_zh(
                 "缺作者拼音时，中文署名和 PubMed 的罗马化署名根本无法比对，"
                 "导师本人是不是这篇的第一作者就只能靠猜——这一列是这张表能不能用的分水岭，"
                 "所以它在这里是必填，而不像毕业名单里那样可选。"
-            )
+            ))
+        why = lazy_join(reasons)
         raise ChineseRecordError(
-            f"中文题录表缺少必需列: {wanted}（{path}）。{why}表头读到的列: {found}。"
+            lazy_zh("中文题录表缺少必需列: {wanted}（{path}）。{why}表头读到的列: {found}。",
+                    wanted=wanted, path=path, why=why, found=found)
         )
     return mapping, unknown
 
@@ -680,14 +682,16 @@ def load_chinese_records(path: str | Path) -> dict[str, Any]:
     """
     path = Path(path)
     if not path.exists():
-        raise FileNotFoundError(f"中文题录表不存在: {path}")
+        raise FileNotFoundError(lazy_zh("中文题录表不存在: {path}",
+                                        path=path))
 
     text, encoding = _decode(path)
     reader = csv.reader(io.StringIO(text, newline=""))
     try:
         header = next(reader)
     except StopIteration:
-        raise ChineseRecordError(f"中文题录表是空文件: {path}") from None
+        raise ChineseRecordError(lazy_zh("中文题录表是空文件: {path}",
+                                         path=path)) from None
 
     mapping, unknown_columns = _header_map(header, path)
     columns_used = {key: _clean(header[position]) for position, key in mapping.items()}
@@ -737,7 +741,7 @@ def load_chinese_records(path: str | Path) -> dict[str, Any]:
     for flag, count in flag_counts.items():
         logger.warning("  %d 行带标记 %s（已保留，未丢弃）", count, flag)
     if unknown_columns:
-        logger.info("中文题录表有本工具不认识的列，已忽略: %s", "、".join(unknown_columns))
+        logger.info("中文题录表有本工具不认识的列，已忽略: %s", zh("、").join(unknown_columns))
 
     return {
         "path": str(path),

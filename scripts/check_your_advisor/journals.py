@@ -93,6 +93,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from .i18n import lazy_join, lazy_zh, zh
+
 logger = logging.getLogger("check_your_advisor.journals")
 
 __all__ = [
@@ -466,8 +468,8 @@ def _decode(path: str) -> tuple[str, str]:
         except UnicodeDecodeError:
             continue
     raise JournalTableError(
-        f"期刊表无法解码: {path}（已尝试 {', '.join(_ENCODINGS)}）。"
-        "请在 Excel 里另存为 UTF-8 CSV 后重试。"
+        lazy_zh("期刊表无法解码: {path}（已尝试 {encodings}）。请在 Excel 里另存为 UTF-8 CSV 后重试。",
+                path=path, encodings=', '.join(_ENCODINGS))
     )
 
 
@@ -489,22 +491,23 @@ def _header_map(header: Sequence[str], path: str) -> tuple[dict[int, str], list[
             continue
         if key in seen:
             raise JournalTableError(
-                f"期刊表表头有两列都对应字段 {key}: 第 {seen[key] + 1} 列与第 {position + 1} 列"
-                f"（{path}）。请删掉其中一列后重试。"
+                lazy_zh("期刊表表头有两列都对应字段 {key}: 第 {value} 列与第 {value_2} 列（{path}）。请删掉其中一列后重试。",
+                        key=key, value=seen[key] + 1, value_2=position + 1, path=path)
             )
         seen[key] = position
         mapping[position] = key
 
     missing = [k for k in REQUIRED_FIELDS if k not in seen]
     if missing:
-        wanted = "、".join(f"{_BY_KEY[k].zh}（或 {_BY_KEY[k].en}）" for k in missing)
+        wanted = lazy_join([lazy_zh("{zh}（或 {en}）", zh=_BY_KEY[k].zh, en=_BY_KEY[k].en) for k in missing], lazy_zh("、"))
         why = ""
         if {"source_edition", "retrieved_on"} & set(missing):
-            why = (
+            why = lazy_zh(
                 "缺版本来源或数据获取日期时，表里的分区数字过后无法追溯是哪一版、"
                 "哪一天取的，因此不接受这张表。"
             )
-        raise JournalTableError(f"期刊表缺少必需列: {wanted}（{path}）。{why}")
+        raise JournalTableError(lazy_zh("期刊表缺少必需列: {wanted}（{path}）。{why}",
+                                        wanted=wanted, path=path, why=why))
     return mapping, unknown
 
 
@@ -578,7 +581,8 @@ def load_journal_table(path: str) -> dict[str, Any]:
     try:
         header = next(reader)
     except StopIteration:
-        raise JournalTableError(f"期刊表是空文件: {path}") from None
+        raise JournalTableError(lazy_zh("期刊表是空文件: {path}",
+                                        path=path)) from None
 
     mapping, unknown_columns = _header_map(header, path)
 
@@ -623,14 +627,14 @@ def load_journal_table(path: str) -> dict[str, Any]:
     logger.info(
         "期刊表已载入: %s，%d 行 / %d 本刊，编码 %s，版本来源 %s",
         path, len(rows), len(groups), encoding,
-        "、".join(f"{name} {count}" for name, count in editions.most_common()) or "无",
+        zh("、").join(f"{name} {count}" for name, count in editions.most_common()) or "无",
     )
     if without_edition:
         logger.warning("期刊表有 %d 行未标注版本来源，其分区数字无法追溯来源", without_edition)
     if invalid_issns:
         logger.warning("期刊表有 %d 行 ISSN 校验失败，这些行只能靠刊名匹配", len(invalid_issns))
     if unknown_columns:
-        logger.info("期刊表有本工具不认识的列，已忽略: %s", "、".join(unknown_columns))
+        logger.info("期刊表有本工具不认识的列，已忽略: %s", zh("、").join(unknown_columns))
 
     return {
         "path": str(path),
@@ -925,7 +929,7 @@ def write_worklist_csv(
     annotated = sum(1 for entry in worklist.get("entries", [])
                     if str(entry.get("journal") or "") in risk_cells)
     logger.info("待查清单已写入: %s（%d 本刊待查%s）", target, len(worklist.get("entries", [])),
-                f"，其中 {annotated} 本已带公开风险信号" if annotated else "")
+                zh("，其中 {annotated} 本已带公开风险信号", annotated=annotated) if annotated else "")
     return str(target)
 
 

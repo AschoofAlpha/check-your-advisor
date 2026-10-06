@@ -5,6 +5,13 @@ Owns the corpus gates and the section ordering that turns metric dicts into a
 Markdown document plus a JSON record of the same numbers. The caveat strings it
 renders come from `caveats.py` unchanged.
 
+Every sentence here is written in English and passed through `i18n.en`, so the
+same function renders either language. `build_report` writes the English report
+and keeps the inputs its sections were built from; `localize` rebuilds those
+sections in Chinese from the same inputs, which is why the two reports cannot
+disagree about a number. The JSON record is one file whichever page it sits
+beside.
+
 This module draws nothing. The activity timeline is an inline SVG in the HTML
 report (`charts.person_timeline_chart`); `build_report` keeps `gantt_path` so a
 caller holding a raster of its own (`analyze`) can still point at one.
@@ -70,7 +77,7 @@ from ..evaluations import (
     EVALUATION_STANCE,
     join_evaluations,
 )
-from ..journal_risk import JOURNAL_RISK_CAVEATS, SOURCE_ORDER, join_risk
+from ..journal_risk import JOURNAL_RISK_CAVEATS, SOURCE_ORDER, describe_signal, join_risk
 from ..journals import (
     EDITIONS,
     JOURNAL_CAVEATS,
@@ -94,6 +101,9 @@ from ..theses import (
     ROSTER_LIMITS,
     THESIS_DENOMINATOR_CAVEAT,
     reconcile_roster,
+)
+from ..i18n import (
+    REPORT_LANGUAGES, en, in_language, language, lazy_en, normalize, report_suffix, using, zh,
 )
 from . import metrics as M
 from .caveats import DROPPED_REGISTER, caveat
@@ -421,7 +431,9 @@ def _gate(gate_id: str, observed: dict[str, Any], message: str | None = None,
     return {
         "id": gate_id,
         "name": name,
-        "message": message.format(**fields),
+        # A template and its fields rather than the finished sentence, so the
+        # refusal page can be written in either language.
+        "message": lazy_en(message, **fields) if fields else message.format(),
         "observed": observed,
     }
 
@@ -438,7 +450,7 @@ def _flat_observed(observed: Mapping[str, Any]) -> str:
         if isinstance(value, (list, tuple)):
             parts.append(f"{key}={len(value)}")
         elif value == "" or value is None:
-            parts.append(f"{key}=(none)")
+            parts.append(en("{key}=(none)", key=key))
         else:
             parts.append(f"{key}={value}")
     return "; ".join(parts)
@@ -989,7 +1001,7 @@ def _fmt_person(entry: dict[str, Any]) -> str:
 
 
 def _pmid_list(pmids: Sequence[str]) -> str:
-    return ", ".join(pmids) if pmids else "none"
+    return ", ".join(pmids) if pmids else en("none")
 
 
 def resolve_score_weights(config: dict[str, Any] | None) -> dict[str, float]:
@@ -1043,6 +1055,7 @@ def resolve_openalex_record_share(config: Mapping[str, Any] | None) -> float:
     return float(value)
 
 
+@in_language("en")
 def build_report(
     corpus: dict[str, Any],
     config: dict[str, Any] | None = None,
@@ -1320,16 +1333,24 @@ def build_report(
         "flips": people_data["flips"],
     }
 
+    # Kept on the report rather than discarded, because they are what `localize`
+    # writes the other language's sections from. Every value here is the same
+    # object the report already holds elsewhere, so this costs references, not
+    # copies — the one exception is the impact reference, which no other key
+    # carries and which the JSON has never included.
+    section_inputs = {
+        "prov": provenance, "computed": computed, "gantt_path": gantt_path,
+        "impact": impact, "citations_note": citations_note,
+        "score": score, "stars": stars,
+        "journals": journals, "journal_note": journal_note,
+        "risk": risk, "risk_note": journal_risk_note,
+        "impact_reference": impact_reference, "impact_reference_note": impact_reference_note,
+        "graduates": graduates, "thesis_note": thesis_note,
+        "evaluations": evaluations, "evaluation_note": evaluation_note,
+        "warnings": warnings,
+    }
     used_caveats: dict[str, str] = {}
-    sections = _build_sections(
-        provenance, computed, used_caveats, gantt_path, impact, citations_note, score,
-        stars=stars, journals=journals, journal_note=journal_note,
-        risk=risk, risk_note=journal_risk_note,
-        impact_reference=impact_reference, impact_reference_note=impact_reference_note,
-        graduates=graduates, thesis_note=thesis_note,
-        evaluations=evaluations, evaluation_note=evaluation_note,
-        warnings=warnings,
-    )
+    sections = _build_sections(used=used_caveats, **section_inputs)
     return {
         "schema_version": SCHEMA_VERSION,
         "generated_at": now.isoformat(timespec="seconds"),
@@ -1374,6 +1395,7 @@ def build_report(
         ),
         "caveats": used_caveats,
         "sections": sections,
+        "section_inputs": section_inputs,
     }
 
 
@@ -1419,6 +1441,9 @@ def _refusal(gate: dict[str, Any], author_name: str, now: datetime) -> dict[str,
         "evaluation_note": "",
         "caveats": {},
         "sections": [],
+        # None, not {}: there is nothing to rebuild, and `localize` reads a refusal's
+        # page from the gate at render time.
+        "section_inputs": None,
     }
 
 
@@ -1455,16 +1480,14 @@ def build_report_from_path(
 # --- Sections ---
 
 
-#: Chinese titles, printed alongside the English ones rather than instead of them.
+#: The Chinese report's section headings.
 #:
-#: The report body is English and the command-line log is Chinese, which the
-#: README has called an indefensible accident since round one. Translating the
-#: body is a separate piece of work and a risky one: this report's value is in
-#: the precision of sentences like "a paper with no percentile is not a low
-#: percentile", and a translation that drifts from one of those cannot be caught
-#: by any test here. So the headings are bilingual and the bodies are not — a
-#: reader can navigate the report in Chinese, and every argued sentence is still
-#: the sentence that was argued.
+#: Round four printed these beside the English titles, in the one report there
+#: was, because the body was English and translating it was work nobody had done.
+#: That work is done (`check_your_advisor.locales`), so each report is now written
+#: in one language: the English page carries the English title alone and the
+#: Chinese page this one. The English titles stay exactly as they were, because
+#: four other modules and SKILL.md cross-reference sections by them.
 #:
 #: Keyed by section id, so a renumbering fails loudly instead of silently
 #: relabelling a section. `test_profile.py` holds this table to covering every id
@@ -1495,15 +1518,15 @@ SECTION_TITLES_ZH: dict[int, str] = {
 
 
 def _titled(section_id: int, english: str) -> str:
-    """One heading in both languages, Chinese first, English unchanged after it.
+    """One heading, in the language the report is being written in.
 
-    English is kept verbatim rather than dropped: every cross-reference in this
-    package, in SKILL.md and in four other modules names sections by their
-    English title, and a heading that no longer contains it would break each of
-    them silently.
+    The Chinese title comes from `SECTION_TITLES_ZH` rather than the catalogs, so
+    the one table that test_profile.py holds to every emitted section is the table
+    the Chinese page actually prints.
     """
-    chinese = SECTION_TITLES_ZH.get(section_id)
-    return f"{chinese} / {english}" if chinese else english
+    if language() == "zh":
+        return SECTION_TITLES_ZH.get(section_id) or en(english)
+    return english
 
 
 def _build_sections(
@@ -1557,7 +1580,7 @@ def _build_sections(
     # the opposite of what this sentence says, and it is printed in Section 1's
     # evidence line instead.
     rejected = _readable_counts(prov["counts"]).get("rejected")
-    rejected_text = "An unrecorded number of" if rejected is None else str(rejected)
+    rejected_text = en("An unrecorded number of") if rejected is None else str(rejected)
 
     sections = [
         # Section 0 precedes provenance because the limits reframe every number
@@ -1638,7 +1661,7 @@ def _build_sections(
                  prose=_dropped_register_prose(warnings)),
         _section(15, _titled(15, "Citation impact"),
                  body=_impact_body(impact, citations_note, impact_reference, impact_reference_note),
-                 prose=_IMPACT_PROSE),
+                 prose=[en(text) for text in _IMPACT_PROSE]),
         _section(16, _titled(16, "Composite score and star band"),
                  body=_score_body(score, stars),
                  prose=_score_prose()),
@@ -1658,6 +1681,19 @@ def _build_sections(
                  prose=_evaluations_prose()),
     ]
     return sections
+
+
+def _observed_line(item: Mapping[str, Any]) -> str:
+    """A warning's observed values in the language being written.
+
+    Rebuilt from `observed` rather than read from `observed_text`, which was
+    rendered once in English when the warning was raised and is what the JSON
+    record and the command-line log carry. The arithmetic is the same either
+    way; only the word for an empty value changes.
+    """
+    observed = item.get("observed")
+    text = _flat_observed(observed) if isinstance(observed, Mapping) else item.get("observed_text")
+    return text or en("(none)")
 
 
 def _warning_line(item: Mapping[str, Any]) -> str:
@@ -1681,18 +1717,17 @@ def _warning_line(item: Mapping[str, Any]) -> str:
     the warnings this function renders.
     """
     history = (
-        "This condition used to refuse the whole report; it now renders in full and the "
-        "process still exits 1."
+        en("This condition used to refuse the whole report; it now renders in full and the "
+           "process still exits 1.")
         if item.get("downgraded", True) else
-        "This condition has never refused a report: it is printed, the report renders in full, "
-        "and the process exits 1."
+        en("This condition has never refused a report: it is printed, the report renders in full, "
+           "and the process exits 1.")
     )
     return (
-        f"**Warning {item['id']} ({item['name']}) — {item['message']}** "
-        f"Observed: {item['observed_text'] or '(none)'}. "
-        f"Fix: {item['fix']} "
-        f"{history} Nothing below is certified: every number in this section was "
-        f"computed over the corpus this warning describes."
+        en("**Warning {id} ({name}) — {message}** Observed: {observed_text}. Fix: "
+           "{fix} {history} Nothing below is certified: every number in this section "
+           "was computed over the corpus this warning describes.",
+           id=item['id'], name=en(item['name']), message=en(item['message']), observed_text=_observed_line(item), fix=en(item['fix']), history=history)
     )
 
 
@@ -1720,6 +1755,16 @@ REVERSALS: tuple[tuple[str, str], ...] = (
 )
 
 
+def _register_lines(entries: Sequence[tuple[str, str]]) -> list[str]:
+    """One bullet per `(name, reason)` register entry, both halves translated."""
+    return [en("- **{name}** — {reason}", name=en(name), reason=en(reason)) for name, reason in entries]
+
+
+def _keyed_lines(entries: Mapping[str, str]) -> list[str]:
+    """One bullet per `{id: text}` caveat, the id kept as written: it is a citation key."""
+    return [en("- **{key}** — {text}", key=key, text=en(text)) for key, text in entries.items()]
+
+
 def _dropped_register_prose(warnings: Sequence[Mapping[str, Any]]) -> list[str]:
     """Section 14: the standing register, the reversals, then this run's warnings.
 
@@ -1733,13 +1778,13 @@ def _dropped_register_prose(warnings: Sequence[Mapping[str, Any]]) -> list[str]:
     this register is the one place a reader can check that claim, so it is the
     last place that may guess at it.
     """
-    lines = [f"- **{name}** — {reason}" for name, reason in DROPPED_REGISTER]
+    lines = _register_lines(DROPPED_REGISTER)
     lines += [
         "",
-        "**Reversed decisions — behaviour that was removed and then restored:**",
+        en("**Reversed decisions — behaviour that was removed and then restored:**"),
         "",
     ]
-    lines += [f"- **{name}** — {reason}" for name, reason in REVERSALS]
+    lines += _register_lines(REVERSALS)
     if not warnings:
         return lines
     downgraded = [item for item in warnings if item.get("downgraded", True)]
@@ -1747,33 +1792,32 @@ def _dropped_register_prose(warnings: Sequence[Mapping[str, Any]]) -> list[str]:
     if downgraded:
         lines += [
             "",
-            "**Downgraded on this run — what was refused before and is printed instead:**",
+            en("**Downgraded on this run — what was refused before and is printed instead:**"),
             "",
         ]
         lines += [
-            f"- **{item['id']} ({item['name']})** — this used to refuse the whole report. It is "
-            f"now a warning at the top of Sections "
-            f"{', '.join(str(section) for section in item['sections'])}, the report below was "
-            f"built anyway, and the process exit code is still 1. Observed: "
-            f"{item['observed_text'] or '(none)'}. Nothing in this report was suppressed to "
-            f"accommodate it, so every count below is computed over a corpus whose identity is "
-            f"unconfirmed and should be read that way."
+            en("- **{id} ({name})** — this used to refuse the whole report. It is now a "
+               "warning at the top of Sections {items}, the report below was built "
+               "anyway, and the process exit code is still 1. Observed: {observed_text}. "
+               "Nothing in this report was suppressed to accommodate it, so every count "
+               "below is computed over a corpus whose identity is unconfirmed and should "
+               "be read that way.",
+               id=item['id'], name=en(item['name']), items=', '.join(str(section) for section in item['sections']), observed_text=_observed_line(item))
             for item in downgraded
         ]
     if never_gates:
         lines += [
             "",
-            "**Raised on this run — conditions that were never gates:**",
+            en("**Raised on this run — conditions that were never gates:**"),
             "",
         ]
         lines += [
-            f"- **{item['id']} ({item['name']})** — this has never refused a report. It is a "
-            f"warning at the top of Sections "
-            f"{', '.join(str(section) for section in item['sections'])}, the report below was "
-            f"built anyway, and the process exit code is 1. Observed: "
-            f"{item['observed_text'] or '(none)'}. Nothing in this report was suppressed to "
-            f"accommodate it, so every count below is computed over the corpus this warning "
-            f"describes and should be read that way."
+            en("- **{id} ({name})** — this has never refused a report. It is a warning at "
+               "the top of Sections {items}, the report below was built anyway, and the "
+               "process exit code is 1. Observed: {observed_text}. Nothing in this report "
+               "was suppressed to accommodate it, so every count below is computed over "
+               "the corpus this warning describes and should be read that way.",
+               id=item['id'], name=en(item['name']), items=', '.join(str(section) for section in item['sections']), observed_text=_observed_line(item))
             for item in never_gates
         ]
     return lines
@@ -1805,16 +1849,19 @@ def _coverage_lines(query: Mapping[str, Any]) -> list[str]:
     returned = query.get("pmids_returned", "?")
     budget = query.get("max_records", "?")
     lines = [
-        f"- PubMed corpus coverage: retrieved {returned} of {count} records esearch matched "
-        f"(esearch pages fetched {query.get('pages_fetched', '?')}; page size retmax="
-        f"{query.get('retmax', '?')}; budget max_records={budget}; "
-        f"repeated PMIDs dropped across pages {query.get('duplicates_dropped', '?')})",
+        en("- PubMed corpus coverage: retrieved {returned} of {count} records esearch "
+           "matched (esearch pages fetched {pages_fetched}; page size "
+           "retmax={retmax}; budget max_records={budget}; repeated PMIDs dropped "
+           "across pages {duplicates_dropped})",
+           returned=returned, count=count, pages_fetched=query.get('pages_fetched', '?'), retmax=query.get('retmax', '?'), budget=budget, duplicates_dropped=query.get('duplicates_dropped', '?')),
     ]
     if isinstance(count, int) and isinstance(returned, int) and returned < count:
         lines.append(
-            f"- **{count - returned} of those {count} records were never retrieved.** Every count "
-            f"below is computed over the {returned} that were, and is a floor rather than a value. "
-            + coverage_remedy(count, budget, "en")
+            en("- **{value} of those {count} records were never retrieved.** Every count "
+               "below is computed over the {returned} that were, and is a floor rather "
+               "than a value. {remedy}",
+               value=count - returned, count=count, returned=returned,
+               remedy=coverage_remedy(count, budget, language() or "en"))
         )
     return lines
 
@@ -1855,18 +1902,21 @@ def _source_lines(counts: Mapping[str, Any], corpus_size: int) -> list[str]:
     by_source = counts.get("by_source")
     if by_source is not None and not _is_count_histogram(by_source):
         return [
-            f"- corpus sources: not recorded — this corpus file carries by_source={by_source!r}, "
-            f"which is not a mapping of source name to whole-number count, so neither the split "
-            f"nor the harvested total can be stated and nothing was assumed in their place. The "
-            f"{corpus_size} record(s) every count below is over are unaffected: they are counted "
-            f"from the records themselves, not from this block. Re-harvest to rewrite the file."
+            en("- corpus sources: not recorded — this corpus file carries "
+               "by_source={by_source!r}, which is not a mapping of source name to "
+               "whole-number count, so neither the split nor the harvested total can be "
+               "stated and nothing was assumed in their place. The {corpus_size} "
+               "record(s) every count below is over are unaffected: they are counted from "
+               "the records themselves, not from this block. Re-harvest to rewrite the "
+               "file.",
+               by_source=by_source, corpus_size=corpus_size)
         ]
     by_source = by_source or {}
     if not by_source:
         return [
-            "- corpus sources: PubMed only. No second source was merged into this corpus, so every "
-            "denominator below is the PubMed corpus. (`harvest --openalex-works` adds OpenAlex as a "
-            "second source and prints both denominators here.)"
+            en("- corpus sources: PubMed only. No second source was merged into this corpus, so every "
+               "denominator below is the PubMed corpus. (`harvest --openalex-works` adds OpenAlex as a "
+               "second source and prints both denominators here.)")
         ]
     pubmed_only = by_source.get("pubmed", 0)
     openalex_only = by_source.get("openalex", 0)
@@ -1874,24 +1924,26 @@ def _source_lines(counts: Mapping[str, Any], corpus_size: int) -> list[str]:
     harvested = sum(by_source.values())
     other = {key: value for key, value in sorted(by_source.items())
              if key not in ("pubmed", "openalex", "both")}
-    unknown = (
-        f" + {sum(other.values())} under source name(s) the merge does not write "
-        f"({', '.join(f'{key} {value}' for key, value in other.items())})"
+    unknown = en(
+        " + {total} under source name(s) the merge does not write ({names})",
+        total=sum(other.values()), names=", ".join(f"{key} {value}" for key, value in other.items()),
     ) if other else ""
     return [
-        f"- corpus sources: {harvested} harvested record(s) = {pubmed_only} PubMed only + "
-        f"{openalex_only} OpenAlex only + {both} held by both{unknown}",
-        f"- the two denominators are different numbers and both are stated: the PubMed corpus is "
-        f"{pubmed_only + both} record(s), the merged corpus is {harvested}. The record exclusions "
-        f"listed below apply to both, and every count elsewhere in this report is over the "
-        f"{corpus_size} record(s) that survived them.",
+        en("- corpus sources: {harvested} harvested record(s) = {pubmed_only} PubMed "
+           "only + {openalex_only} OpenAlex only + {both} held by both{unknown}",
+           harvested=harvested, pubmed_only=pubmed_only, openalex_only=openalex_only, both=both, unknown=unknown),
+        en("- the two denominators are different numbers and both are stated: the "
+           "PubMed corpus is {value} record(s), the merged corpus is {harvested}. The "
+           "record exclusions listed below apply to both, and every count elsewhere "
+           "in this report is over the {corpus_size} record(s) that survived them.",
+           value=pubmed_only + both, harvested=harvested, corpus_size=corpus_size),
     ]
 
 
 def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> list[str]:
     """What OpenAlex was asked, what it answered, and when.
 
-    Printed separately from the identity line above it because the two are
+    Printed separately from the identity line below it because the two are
     different kinds of claim. `orcid`, `affiliation_keywords` and `email_domains`
     are the user's own assertions about who this is. An OpenAlex author id is one
     database's clustering decision, and it is only usable as evidence if a reader
@@ -1914,12 +1966,14 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
     resolution = _readable_block(resolution_raw)
     works = _readable_block(works_raw)
     unreadable = [
-        f"- openalex {name}: not recorded — this corpus file carries query.{key}={raw!r} where the "
-        f"block `harvest {flag}` writes belongs, so nothing was read out of it and nothing was "
-        f"assumed in its place. Re-harvest to rewrite the file."
+        en("- openalex {name}: not recorded — this corpus file carries "
+           "query.{key}={raw!r} where the block `harvest {flag}` writes belongs, so "
+           "nothing was read out of it and nothing was assumed in its place. "
+           "Re-harvest to rewrite the file.",
+           name=name, key=key, raw=raw, flag=flag)
         for name, key, flag, raw in (
-            ("author resolution", "openalex", "--resolve-openalex", resolution_raw),
-            ("works lookup", "openalex_works", "--openalex-works", works_raw),
+            (en("author resolution"), "openalex", "--resolve-openalex", resolution_raw),
+            (en("works lookup"), "openalex_works", "--openalex-works", works_raw),
         )
         if raw and not isinstance(raw, Mapping)
     ]
@@ -1928,9 +1982,10 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
         return unreadable
 
     lines = unreadable + [
-        f"- openalex author id in use: {author_id or '(none)'} — this is OpenAlex's own author "
-        f"clustering, not the researcher's assertion, and it is recorded beside the identity line "
-        f"above rather than folded into it"
+        en("- openalex author id in use: {author_id} — this is OpenAlex's own author "
+           "clustering, not the researcher's assertion, and it is recorded beside the "
+           "identity line below rather than folded into it",
+           author_id=author_id or en('(none)'))
     ]
     if resolution:
         # The count in the sentence below is `len(candidates)`, so an unreadable
@@ -1943,38 +1998,38 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
         candidates = candidates_raw if readable else []
         if candidates_raw and not readable:
             lines.append(
-                f"- openalex candidates: not recorded — this corpus file carries "
-                f"candidates={candidates_raw!r}, which is not a list of candidate records, so "
-                f"neither how many there were nor which they were can be stated and nothing was "
-                f"assumed in their place. Re-harvest to rewrite the file."
+                en("- openalex candidates: not recorded — this corpus file carries "
+                   "candidates={candidates_raw!r}, which is not a list of candidate records, "
+                   "so neither how many there were nor which they were can be stated and "
+                   "nothing was assumed in their place. Re-harvest to rewrite the file.",
+                   candidates_raw=candidates_raw)
             )
         # `?` rather than 0 when the list is unreadable: this line's own count
         # would otherwise contradict the line directly above it, and a printed 0
         # is a claim that OpenAlex returned nothing.
         counted = len(candidates) if readable or not candidates_raw else "?"
         lines.append(
-            f"- openalex author resolution: {resolution.get('resolution', '?')} "
-            f"({counted} candidate(s)); query `{resolution.get('query', '')}`; "
-            f"source {resolution.get('source', '?')}; retrieved "
-            f"{resolution.get('retrieved_at') or 'not recorded'}"
+            en("- openalex author resolution: {resolution} ({counted} candidate(s)); "
+               "query `{query}`; source {source}; retrieved {retrieved_at}",
+               resolution=resolution.get('resolution', '?'), counted=counted, query=resolution.get('query', ''), source=resolution.get('source', '?'), retrieved_at=resolution.get('retrieved_at') or en('not recorded'))
         )
         if resolution.get("resolution") == "unique":
             lines.append(
-                "- **this id is the sole candidate of a fuzzy `display_name.search` and was adopted "
-                "without confirmation.** One candidate means the name search returned one profile, "
-                "not that OpenAlex verified who this is: a same-named stranger with a single "
-                "profile looks exactly like this, and so does the right person split across several "
-                "profiles where only one matched. Check the institution and works count printed "
-                "above against the researcher you meant, and re-harvest with "
-                "`--openalex-author-id <id>` if they do not agree."
+                en("- **this id is the sole candidate of a fuzzy `display_name.search` and was adopted "
+                   "without confirmation.** One candidate means the name search returned one profile, "
+                   "not that OpenAlex verified who this is: a same-named stranger with a single "
+                   "profile looks exactly like this, and so does the right person split across several "
+                   "profiles where only one matched. Check the institution and works count printed "
+                   "below against the researcher you meant, and re-harvest with "
+                   "`--openalex-author-id <id>` if they do not agree.")
             )
         if resolution.get("resolution") == "ambiguous":
             lines.append(
-                "- **the name resolved to more than one OpenAlex author and none was adopted.** "
-                "The candidates are listed below; re-harvest with "
-                "`--openalex-author-id <id>` once you recognise the right one. Nothing was picked "
-                "automatically, because picking the most productive candidate decides an identity "
-                "question on a proxy."
+                en("- **the name resolved to more than one OpenAlex author and none was adopted.** "
+                   "The candidates are listed below; re-harvest with "
+                   "`--openalex-author-id <id>` once you recognise the right one. Nothing was picked "
+                   "automatically, because picking the most productive candidate decides an identity "
+                   "question on a proxy.")
             )
         for index, candidate in enumerate(candidates, 1):
             # Same all-or-nothing rule one level down. `(inst or {})` covered
@@ -1985,37 +2040,36 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
             institutions_raw = candidate.get("institutions")
             institutions = (", ".join(
                 str(inst.get("display_name", "")) for inst in institutions_raw
-            ) if _is_record_list(institutions_raw) else "") or "not recorded"
+            ) if _is_record_list(institutions_raw) else "") or en("not recorded")
             lines.append(
-                f"  - candidate {index}/{counted}: {candidate.get('display_name', '')} "
-                f"(id {candidate.get('openalex_author_id', '?')}; orcid "
-                f"{candidate.get('orcid') or '(none)'}; works {candidate.get('works_count', '?')}; "
-                f"institutions {institutions})"
+                en("  - candidate {index}/{counted}: {display_name} (id {openalex_author_id}; "
+                   "orcid {orcid}; works {works_count}; institutions {institutions})",
+                   index=index, counted=counted, display_name=candidate.get('display_name', ''), openalex_author_id=candidate.get('openalex_author_id', '?'), orcid=candidate.get('orcid') or en('(none)'), works_count=candidate.get('works_count', '?'), institutions=institutions)
             )
     if works:
         if not works.get("merged"):
             lines.append(
-                f"- openalex works: requested but not merged — {works.get('reason', 'unstated')}"
+                en("- openalex works: requested but not merged — {reason}", reason=en(works.get('reason') or 'unstated'))
             )
         elif works.get("request_failed"):
             # Distinguished from a completed lookup that found nothing, because
             # "retrieved 0 of 0" reads as a fact about the author and this is a
             # fact about the request.
             lines.append(
-                f"- **the OpenAlex works lookup failed after {works.get('pages_fetched', '?')} "
-                f"page(s), so only {works.get('works_returned', '?')} of this author's works "
-                f"reached the merge.** That is a failed request, not an author with no works: the "
-                f"OpenAlex side of every count below is a floor of unknown depth. Re-run the "
-                f"harvest to close it."
+                en("- **the OpenAlex works lookup failed after {pages_fetched} page(s), so "
+                   "only {works_returned} of this author's works reached the merge.** That is "
+                   "a failed request, not an author with no works: the OpenAlex side of every "
+                   "count below is a floor of unknown depth. Re-run the harvest to close it.",
+                   pages_fetched=works.get('pages_fetched', '?'), works_returned=works.get('works_returned', '?'))
             )
         else:
             lines.append(
-                f"- openalex works coverage: retrieved {works.get('works_returned', '?')} of "
-                f"{works.get('works_matched', '?')} works OpenAlex files under this author id "
-                f"(pages {works.get('pages_fetched', '?')}; budget max_works="
-                f"{works.get('max_works', '?')}); {works.get('works_usable', '?')} usable after "
-                f"dropping {works.get('works_without_lead_slot', '?')} where this author holds no "
-                f"first / last / corresponding slot"
+                en("- openalex works coverage: retrieved {works_returned} of {works_matched} "
+                   "works OpenAlex files under this author id (pages {pages_fetched}; budget "
+                   "max_works={max_works}); {works_usable} usable after dropping "
+                   "{works_without_lead_slot} where this author holds no first / last / "
+                   "corresponding slot",
+                   works_returned=works.get('works_returned', '?'), works_matched=works.get('works_matched', '?'), pages_fetched=works.get('pages_fetched', '?'), max_works=works.get('max_works', '?'), works_usable=works.get('works_usable', '?'), works_without_lead_slot=works.get('works_without_lead_slot', '?'))
             )
             # `or {}` again, and again it only covered `None`. Every field under
             # it already prints `?` when absent, so an unreadable block prints
@@ -2023,23 +2077,25 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
             # fabricate.
             matched = _readable_block(works.get("matched_on"))
             lines.append(
-                f"- cross-source confirmations — an OpenAlex work landing on a record PubMed also "
-                f"holds, on a key PubMed itself published: DOI {matched.get('doi', '?')}, PMID "
-                f"{matched.get('pmid', '?')}, title+year {matched.get('title_year', '?')} "
-                f"(strongest key first; title+year is the only one that can be wrong). These are "
-                f"the only hits where two independent databases agree the paper exists."
+                en("- cross-source confirmations — an OpenAlex work landing on a record "
+                   "PubMed also holds, on a key PubMed itself published: DOI {doi}, PMID "
+                   "{pmid}, title+year {title_year} (strongest key first; title+year is the "
+                   "only one that can be wrong). These are the only hits where two "
+                   "independent databases agree the paper exists.",
+                   doi=matched.get('doi', '?'), pmid=matched.get('pmid', '?'), title_year=matched.get('title_year', '?'))
             )
             internal = works.get("openalex_internal_duplicates")
             if isinstance(internal, Mapping):
                 lines.append(
-                    f"- OpenAlex records deduplicated against each other — one database listing one "
-                    f"paper twice, confirming nothing: DOI {internal.get('doi', '?')}, PMID "
-                    f"{internal.get('pmid', '?')}, title+year {internal.get('title_year', '?')}. "
-                    f"This bucket also holds the near-miss: an OpenAlex work that reaches a PubMed "
-                    f"record only through a DOI another OpenAlex work donated. The paper is still "
-                    f"counted once, but PubMed never published that key, so nothing about the hit "
-                    f"is cross-source. Counted separately from the line above because adding the "
-                    f"two together prints same-source dedup as cross-source agreement."
+                    en("- OpenAlex records deduplicated against each other — one database listing "
+                       "one paper twice, confirming nothing: DOI {doi}, PMID {pmid}, title+year "
+                       "{title_year}. This bucket also holds the near-miss: an OpenAlex work that "
+                       "reaches a PubMed record only through a DOI another OpenAlex work donated. "
+                       "The paper is still counted once, but PubMed never published that key, so "
+                       "nothing about the hit is cross-source. Counted separately from the line "
+                       "above because adding the two together prints same-source dedup as "
+                       "cross-source agreement.",
+                       doi=internal.get('doi', '?'), pmid=internal.get('pmid', '?'), title_year=internal.get('title_year', '?'))
                 )
     return lines
 
@@ -2217,11 +2273,13 @@ def _unreadable_lines(unreadable: Mapping[str, Any]) -> list[str]:
         return []
     held = ", ".join(f"{key}={value!r}" for key, value in sorted(unreadable.items()))
     return [
-        f"- corpus fields not recorded — this corpus file carries {held}, and none of those is the "
-        f"shape this report reads that key at, so nothing was taken from them and nothing was "
-        f"assumed in their place. The records themselves are unaffected and every count below is "
-        f"over them. An identity field named here reached no record by definition, which is what "
-        f"the identity warning above reports. Re-harvest to rewrite the file."
+        en("- corpus fields not recorded — this corpus file carries {held}, and none "
+           "of those is the shape this report reads that key at, so nothing was taken "
+           "from them and nothing was assumed in their place. The records themselves "
+           "are unaffected and every count below is over them. An identity field "
+           "named here reached no record by definition, which is what the identity "
+           "warning above reports. Re-harvest to rewrite the file.",
+           held=held)
     ]
 
 
@@ -2260,18 +2318,19 @@ def _target_name_lines(prov: Mapping[str, Any]) -> list[str]:
     """
     located, of_records = prov.get("target_name_records") or (0, 0)
     name = (prov.get("author_name") or "").strip()
-    subject = f"`{name}`" if name else "(no target name was configured)"
+    subject = f"`{name}`" if name else en("(no target name was configured)")
     tail = (
-        " Warning G7 is raised at zero. This is the only count in this section that looks at the "
-        "name at all: the two lines below it are derived from role strings and author ids, so "
-        "they read the same whether the name on the command line was the right one or a typo."
+        en(" Warning G7 is raised at zero. This is the only count in this section that looks at the "
+           "name at all: the two lines below it are derived from role strings and author ids, so "
+           "they read the same whether the name on the command line was the right one or a typo.")
     ) if not located else (
-        " Counted through the same matcher `roles.resolve_pi` builds its candidate list with, so "
-        "this is the number of records that could have a located PI, over the harvested file."
+        en(" Counted through the same matcher `roles.resolve_pi` builds its candidate list with, so "
+           "this is the number of records that could have a located PI, over the harvested file.")
     )
     return [
-        f"- target name on records: {located} of {of_records} harvested record(s) carry "
-        f"{subject} on a byline." + tail
+        en("- target name on records: {located} of {of_records} harvested record(s) "
+           "carry {subject} on a byline.",
+           located=located, of_records=of_records, subject=subject) + tail
     ]
 
 
@@ -2331,25 +2390,26 @@ def _evidence_lines(prov: Mapping[str, Any]) -> list[str]:
     with_evidence = sum(by_evidence.values())
     if unreadable:
         lines = [
-            "- identity evidence on records: not recorded — this corpus file carries "
-            + " and ".join(unreadable)
-            + ", which is not a number this line can add up, so neither the numerator nor the "
-            "denominator can be stated. Nothing was assumed in their place. Re-harvest to rewrite "
-            "the file."
-            + (f" Records that do carry a marker: {tiers}." if tiers else "")
+            en("- identity evidence on records: not recorded — this corpus file carries "
+               "{unreadable}, which is not a number this line can add up, so neither the "
+               "numerator nor the denominator can be stated. Nothing was assumed in their "
+               "place. Re-harvest to rewrite the file.",
+               unreadable=en(" and ").join(unreadable))
+            + (en(" Records that do carry a marker: {tiers}.", tiers=tiers) if tiers else "")
         ]
     elif name_only is None:
         lines = [
-            "- identity evidence on records: not recorded — this corpus holds records whose role "
-            "string predates the evidence markers, so a record that carried no evidence cannot be "
-            "told apart from one whose evidence was never written down. Re-harvest to settle it."
-            + (f" Records that do carry a marker: {tiers}." if tiers else "")
+            en("- identity evidence on records: not recorded — this corpus holds records whose role "
+               "string predates the evidence markers, so a record that carried no evidence cannot be "
+               "told apart from one whose evidence was never written down. Re-harvest to settle it.")
+            + (en(" Records that do carry a marker: {tiers}.", tiers=tiers) if tiers else "")
         ]
     else:
         lines = [
-            f"- identity evidence on records: {with_evidence} of {with_evidence + name_only} "
-            f"harvested record(s) carry identity evidence, strongest first — "
-            f"{tiers or 'none'}; name_only {name_only} (the name matched and nothing else did)"
+            en("- identity evidence on records: {with_evidence} of {value} harvested "
+               "record(s) carry identity evidence, strongest first — {tiers}; name_only "
+               "{name_only} (the name matched and nothing else did)",
+               with_evidence=with_evidence, value=with_evidence + name_only, tiers=tiers or en('none'), name_only=name_only)
         ]
     lines = _target_name_lines(prov) + lines
     openalex_id = prov["identity"].get("openalex_author_id") or ""
@@ -2358,12 +2418,14 @@ def _evidence_lines(prov: Mapping[str, Any]) -> list[str]:
         minimum = prov.get("min_openalex_record_share", MIN_OPENALEX_RECORD_SHARE)
         share = (carried / of_records) if of_records else 0.0
         lines.append(
-            f"- openalex author id on records: {carried} of {of_records} "
-            f"(share {share:.2f}). An id on its own stands in for orcid / email_domains / "
-            f"affiliation_keywords only at or above min_openalex_record_share = {minimum:.2f}; "
-            f"below it warning G3 is raised. The boundary is a stated convention, not a "
-            f"measurement — change it under `identity_evidence.min_openalex_record_share` and "
-            f"this line prints whatever you set."
+            en("- openalex author id on records: {carried} of {of_records} (share "
+               "{share:.2f}). An id on its own stands in for orcid / email_domains / "
+               "affiliation_keywords only at or above min_openalex_record_share = "
+               "{minimum:.2f}; below it warning G3 is raised. The boundary is a stated "
+               "convention, not a measurement — change it under "
+               "`identity_evidence.min_openalex_record_share` and this line prints "
+               "whatever you set.",
+               carried=carried, of_records=of_records, share=share, minimum=minimum)
         )
     return lines
 
@@ -2384,10 +2446,12 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
     # block: a file whose `counts` is a string has one defect, and printing it
     # three times would read as three.
     block_unreadable = [
-        f"- provenance counts: not recorded — this corpus file carries "
-        f"counts={prov['counts']!r} where a mapping of count names to numbers belongs, so every "
-        f"number this section takes from that block is stated as unrecorded below rather than "
-        f"assumed. The records themselves are unaffected. Re-harvest to rewrite the file."
+        en("- provenance counts: not recorded — this corpus file carries "
+           "counts={counts!r} where a mapping of count names to numbers belongs, so "
+           "every number this section takes from that block is stated as unrecorded "
+           "below rather than assumed. The records themselves are unaffected. "
+           "Re-harvest to rewrite the file.",
+           counts=prov['counts'])
     ] if prov["counts"] and not isinstance(prov["counts"], Mapping) else []
     # The one key under `counts` whose absence from the page would be a claim.
     # A mapping here is gate G6 and this report was never built; a non-mapping
@@ -2397,16 +2461,17 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
     # under this key would otherwise get a clean page and no sign it was ignored.
     inconsistent = counts.get("inconsistent")
     inconsistency_unreadable = [
-        f"- recorded count inconsistency: not recorded — this corpus file carries "
-        f"counts.inconsistent={inconsistent!r}, which is not the mapping of `fetched`, `verified` "
-        f"and `rejected_would_be` that `harvest` writes there, so nothing was read out of it and "
-        f"gate G6 was neither raised nor cleared on its strength. The counts printed on this line "
-        f"and below come from the other keys in the same block. Re-harvest to rewrite the file."
+        en("- recorded count inconsistency: not recorded — this corpus file carries "
+           "counts.inconsistent={inconsistent!r}, which is not the mapping of "
+           "`fetched`, `verified` and `rejected_would_be` that `harvest` writes "
+           "there, so nothing was read out of it and gate G6 was neither raised nor "
+           "cleared on its strength. The counts printed on this line and below come "
+           "from the other keys in the same block. Re-harvest to rewrite the file.",
+           inconsistent=inconsistent)
     ] if inconsistent and not isinstance(inconsistent, Mapping) else []
     lines = [
-        f"- esearch term: `{query.get('term', '')}`",
-        f"- date range: {query.get('mindate', '?')} to {query.get('maxdate', '?')} "
-        f"(years_back={query.get('years_back', '?')})",
+        en("- esearch term: `{term}`", term=query.get('term', '')),
+        en("- date range: {mindate} to {maxdate} (years_back={years_back})", mindate=query.get('mindate', '?'), maxdate=query.get('maxdate', '?'), years_back=query.get('years_back', '?')),
         *block_unreadable,
         *inconsistency_unreadable,
         *_unreadable_lines(_readable_block(prov.get("unreadable"))),
@@ -2429,80 +2494,88 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
         # each other over the same records under a word that claimed more than
         # the filter checked. The key in the corpus file is untouched — renaming
         # it would strand every file already written — so this line names both.
-        f"- PubMed records: fetched {counts.get('fetched', '?')} / kept "
-        f"{counts.get('verified', '?')} / rejected {counts.get('rejected', '?')} "
-        f"(fetched = parsed out of efetch; kept = the target name held a first / corresponding / "
-        f"last-author slot and the record cleared the identity filter — with "
-        f"require_affiliation=false that filter also passes a name match with nothing behind it, "
-        f"so `kept` is a filter outcome and not a count of confirmed identities; the identity "
-        f"evidence line below splits the harvested records by what actually carried each one. "
-        f"rejected = fetched - kept. Both are counted before any fallback, so a fired fallback "
-        f"shows kept 0; the merged corpus is counted separately above; the corpus file records "
-        f"this number under its original key `verified`)",
+        en("- PubMed records: fetched {fetched} / kept {verified} / rejected "
+           "{rejected} (fetched = parsed out of efetch; kept = the target name held a "
+           "first / corresponding / last-author slot and the record cleared the "
+           "identity filter — with require_affiliation=false that filter also passes "
+           "a name match with nothing behind it, so `kept` is a filter outcome and "
+           "not a count of confirmed identities; the identity evidence line below "
+           "splits the harvested records by what actually carried each one. rejected "
+           "= fetched - kept. Both are counted before any fallback, so a fired "
+           "fallback shows kept 0; the merged corpus is counted separately above; the "
+           "corpus file records this number under its original key `verified`)",
+           fetched=counts.get('fetched', '?'), verified=counts.get('verified', '?'), rejected=counts.get('rejected', '?')),
         *_evidence_lines(prov),
-        f"- identity: orcid={identity.get('orcid') or '(none)'}; "
-        f"affiliation_keywords={len(identity.get('affiliation_keywords') or [])}; "
-        f"email_domains={len(identity.get('email_domains') or [])}",
-        f"- effective require_affiliation: {identity.get('require_affiliation_effective', 'unknown')}",
-        f"- position_filtered: {prov['position_filtered']}",
-        f"- identity fallback fired: {prov['fallback_fired']}"
-        + (" (inferred from the role stamps, not recorded — this corpus predates the explicit key, "
-           "and after a source merge the inference reads False even when the fallback did fire; "
-           "re-harvest to settle it)" if prov["fallback_fired_inferred"] else ""),
-        f"- window used: {prov['window_start_year']} to {prov['window_end_year']}",
-        f"- records usable after exclusions: {prov['corpus_size']} "
-        f"(plus {prov['records_only_size']} counted only in records-per-year)",
+        en("- identity: orcid={orcid}; affiliation_keywords={n_affiliation_keywords}; "
+           "email_domains={n_email_domains}",
+           orcid=identity.get('orcid') or en('(none)'), n_affiliation_keywords=len(identity.get('affiliation_keywords') or []), n_email_domains=len(identity.get('email_domains') or [])),
+        en("- effective require_affiliation: {require_affiliation_effective}", require_affiliation_effective=en(identity.get('require_affiliation_effective', 'unknown'))),
+        en("- position_filtered: {position_filtered}", position_filtered=prov['position_filtered']),
+        en("- identity fallback fired: {fallback_fired}", fallback_fired=prov['fallback_fired'])
+        + (en(" (inferred from the role stamps, not recorded — this corpus predates the explicit key, "
+              "and after a source merge the inference reads False even when the fallback did fire; "
+              "re-harvest to settle it)") if prov["fallback_fired_inferred"] else ""),
+        en("- window used: {window_start_year} to {window_end_year}", window_start_year=prov['window_start_year'], window_end_year=prov['window_end_year']),
+        en("- records usable after exclusions: {corpus_size} (plus "
+           "{records_only_size} counted only in records-per-year)",
+           corpus_size=prov['corpus_size'], records_only_size=prov['records_only_size']),
         "",
-        "Record exclusions (Section 6.5):",
+        en("Record exclusions (Section 6.5):"),
     ]
     for reason, pmids in prov["exclusions"].items():
-        lines.append(f"- {reason}: {len(pmids)} — {_pmid_list(pmids)}")
+        lines.append(en("- {reason}: {count} — {pmids}", reason=en(reason), count=len(pmids), pmids=_pmid_list(pmids)))
     lines += [
         "",
-        f"- title-identical records flagged but not merged: {len(prov['title_duplicates'])} "
-        f"group(s) — {'; '.join(', '.join(g) for g in prov['title_duplicates']) or 'none'}",
-        f"- consortium in the lead slot: {len(prov['slot0_collective_pmids'])} — "
-        f"{_pmid_list(prov['slot0_collective_pmids'])}",
-        f"- sole-author records (the author is forced into the senior slot by the last-author rule): "
-        f"{len(prov['sole_author_papers'])} — {_pmid_list(prov['sole_author_papers'])}",
-        f"- records where two byline entries matched the target name at the same evidence tier: "
-        f"{len(prov['ambiguous_pi_papers'])} — {_pmid_list(prov['ambiguous_pi_papers'])}",
-        f"- configured name exclusions: {_pmid_list(prov['exclude_names'])}",
+        en("- title-identical records flagged but not merged: {n_title_duplicates} "
+           "group(s) — {items}",
+           n_title_duplicates=len(prov['title_duplicates']), items='; '.join(', '.join(g) for g in prov['title_duplicates']) or en('none')),
+        en("- consortium in the lead slot: {n_slot0_collective_pmids} — "
+           "{slot0_collective_pmids}",
+           n_slot0_collective_pmids=len(prov['slot0_collective_pmids']), slot0_collective_pmids=_pmid_list(prov['slot0_collective_pmids'])),
+        en("- sole-author records (the author is forced into the senior slot by the "
+           "last-author rule): {n_sole_author_papers} — {sole_author_papers}",
+           n_sole_author_papers=len(prov['sole_author_papers']), sole_author_papers=_pmid_list(prov['sole_author_papers'])),
+        en("- records where two byline entries matched the target name at the same "
+           "evidence tier: {n_ambiguous_pi_papers} — {ambiguous_pi_papers}",
+           n_ambiguous_pi_papers=len(prov['ambiguous_pi_papers']), ambiguous_pi_papers=_pmid_list(prov['ambiguous_pi_papers'])),
+        en("- configured name exclusions: {exclude_names}", exclude_names=_pmid_list(prov['exclude_names'])),
         "",
-        f"- people found: {prov['n_people']}; strict keying finds {prov['n_strict']}, "
-        f"loose keying finds {prov['n_loose']}",
+        en("- people found: {n_people}; strict keying finds {n_strict}, loose keying "
+           "finds {n_loose}",
+           n_people=prov['n_people'], n_strict=prov['n_strict'], n_loose=prov['n_loose']),
     ]
     return lines
 
 
 def _roster_body(roster: dict[str, Any], gantt_path: str | Path | None) -> list[str]:
     lines = [
-        f"{roster['denominator']} people, after removing the target researcher, consortium entries "
-        f"and configured exclusions.",
+        en("{denominator} people, after removing the target researcher, consortium "
+           "entries and configured exclusions.",
+           denominator=roster['denominator']),
         "",
-        "| person | position label | affiliation signal | appearances | lead slots | "
-        "equal-contribution flags | first | last | censoring | notes |",
+        en("| person | position label | affiliation signal | appearances | lead slots | "
+           "equal-contribution flags | first | last | censoring | notes |"),
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in roster["rows"]:
         censoring = ", ".join(
-            label for label, flag in (("left", row["left_censored"]), ("right", row["right_censored"])) if flag
-        ) or "none"
+            en(label) for label, flag in (("left", row["left_censored"]), ("right", row["right_censored"])) if flag
+        ) or en("none")
         lines.append(
-            f"| {row['name']}{row['marker']} | {STRATUM_LABEL[row['stratum']]} | "
-            f"{row['affiliation_signal']} | {row['n_appearances']} | {row['n_first_slots']} | "
-            f"{row['n_equal_contrib']} | {row['first_year']} | {row['last_year']} | {censoring} | "
-            f"{', '.join(row['flags']) or '-'} |"
+            en("| {name}{marker} | {stratum_label} | {affiliation_signal} | "
+               "{n_appearances} | {n_first_slots} | {n_equal_contrib} | {first_year} | "
+               "{last_year} | {censoring} | {flags} |",
+               name=row['name'], marker=row['marker'], stratum_label=en(STRATUM_LABEL[row['stratum']]), affiliation_signal=en(row['affiliation_signal']), n_appearances=row['n_appearances'], n_first_slots=row['n_first_slots'], n_equal_contrib=row['n_equal_contrib'], first_year=row['first_year'], last_year=row['last_year'], censoring=censoring, flags=', '.join(row['flags']) or '-')
         )
     lines += [
         "",
-        "Rows above are ordered by first appearance, then by name — never by a count. That order "
-        "is the one the timeline figure reads, and it does not move when a re-harvest changes "
-        "somebody's totals.",
+        en("Rows above are ordered by first appearance, then by name — never by a count. That order "
+           "is the one the timeline figure reads, and it does not move when a re-harvest changes "
+           "somebody's totals."),
         "",
-        "By position label: " + ", ".join(
-            f"{STRATUM_LABEL[key]} {value}" for key, value in roster["by_stratum"].items()
-        ),
+        en("By position label: {counts}", counts=", ".join(
+            f"{en(STRATUM_LABEL[key])} {value}" for key, value in roster["by_stratum"].items()
+        )),
     ]
 
     # Round four. Rounds one through three refused to order people at all; the
@@ -2515,197 +2588,205 @@ def _roster_body(roster: dict[str, Any], gantt_path: str | Path | None) -> list[
         ranked = rank_people(roster["rows"], by="first_slots")
         lines += [
             "",
-            "**By first-author slots.** Ties share a rank.",
+            en("**By first-author slots.** Ties share a rank."),
             "",
-            "| rank | person | lead slots | appearances |",
+            en("| rank | person | lead slots | appearances |"),
             "|---|---|---|---|",
         ]
         for row in ranked["ranked"]:
-            tie = " (tied)" if row["tied"] else ""
+            tie = en(" (tied)") if row["tied"] else ""
             lines.append(
-                f"| {row['rank']}{tie} | {row['name']}{row['marker']} | "
-                f"{row['n_first_slots']} | {row['n_appearances']} |"
+                en("| {rank}{tie} | {name}{marker} | {n_first_slots} | {n_appearances} |", rank=row['rank'], tie=tie, name=row['name'], marker=row['marker'], n_first_slots=row['n_first_slots'], n_appearances=row['n_appearances'])
             )
-        lines += ["", ranked["basis"]]
+        lines += ["", en(ranked["basis"])]
     if gantt_path:
-        lines += ["", f"![Person activity timeline]({Path(gantt_path).name})",
-                  f"Timeline rendered by analysis.render_gantt: `{gantt_path}`"]
+        lines += ["", en("![Person activity timeline]({name})", name=Path(gantt_path).name),
+                  en("Timeline rendered by analysis.render_gantt: `{gantt_path}`", gantt_path=gantt_path)]
     else:
         # Markdown cannot hold an inline SVG; an unexplained absence would be worse.
-        lines += ["", "The activity timeline is drawn in the HTML report beside this file "
-                  "(`advisor_profile_*.html`, Section 2), one row per person in the cohort "
-                  "every aggregate below is computed over."]
+        lines += ["", en("The activity timeline is drawn in the HTML report beside this file "
+                     "(`advisor_profile_*.html`, Section 2), one row per person in the cohort "
+                     "every aggregate below is computed over.")]
     return lines
 
 
 def _first_author_body(slots: dict[str, Any], partition: dict[str, Any]) -> list[str]:
-    lines = ["**Paper side — who occupies the lead slot.**", ""]
+    lines = [en("**Paper side — who occupies the lead slot.**"), ""]
     if slots["not_computable"]:
-        lines.append("not computable: the PI is first author on every corpus paper")
+        lines.append(en("not computable: the PI is first author on every corpus paper"))
     elif slots["suppressed"]:
         lines += [
-            f"Only {slots['denominator']} eligible records, which is below the minimum for an "
-            f"aggregate. The records are listed instead:",
+            en("Only {denominator} eligible records, which is below the minimum for an "
+               "aggregate. The records are listed instead:",
+               denominator=slots['denominator']),
             "",
-            "| PMID | year | lead author | position label |",
+            en("| PMID | year | lead author | position label |"),
             "|---|---|---|---|",
         ]
         for row in slots["rows"]:
             lines.append(
-                f"| {row['pmid']} | {row['year']} | {row['lead_name']} | {STRATUM_LABEL[row['stratum']]} |"
+                f"| {row['pmid']} | {row['year']} | {row['lead_name']} | {en(STRATUM_LABEL[row['stratum']])} |"
             )
     else:
         for key, count in slots["counts"].items():
             pct = (slots["percentages"] or {}).get(key)
             suffix = f" ({pct}%)" if pct is not None else ""
-            lines.append(f"- {STRATUM_LABEL[key]}: {count} of {slots['denominator']} records{suffix}")
+            lines.append(en("- {key}: {count} of {denominator} records{suffix}", key=en(STRATUM_LABEL[key]), count=count, denominator=slots['denominator'], suffix=suffix))
     if not slots["not_computable"]:
         # Withheld when the eligible set is empty: the spec requires that case to
         # print its one sentence and no counts at all, including zeros.
         lines += [
             "",
-            f"Eligible records exclude {len(slots['dropped_pi_is_lead'])} where the target researcher "
-            f"holds the lead slot and {len(slots['dropped_slot0_collective'])} where a consortium does.",
+            en("Eligible records exclude {n_dropped_pi_is_lead} where the target "
+               "researcher holds the lead slot and {n_dropped_slot0_collective} where a "
+               "consortium does.",
+               n_dropped_pi_is_lead=len(slots['dropped_pi_is_lead']), n_dropped_slot0_collective=len(slots['dropped_slot0_collective'])),
         ]
     lines += [
         "",
-        "**Person side — who has ever led a paper.**",
+        en("**Person side — who has ever led a paper.**"),
         "",
-        f"- holds at least one lead slot: {partition['counts']['holds_lead']} of "
-        f"{partition['denominator']}",
-        f"- no lead slot, first seen at least {partition['lag_years']} years before the window end: "
-        f"{partition['counts']['observed_without_lead']} of {partition['denominator']}",
-        f"- no lead slot, first seen inside the trailing {partition['lag_years']} years, so too recent "
-        f"to tell: {partition['counts']['too_recent']} of {partition['denominator']}",
+        en("- holds at least one lead slot: {holds_lead} of {denominator}", holds_lead=partition['counts']['holds_lead'], denominator=partition['denominator']),
+        en("- no lead slot, first seen at least {lag_years} years before the window "
+           "end: {observed_without_lead} of {denominator}",
+           lag_years=partition['lag_years'], observed_without_lead=partition['counts']['observed_without_lead'], denominator=partition['denominator']),
+        en("- no lead slot, first seen inside the trailing {lag_years} years, so too "
+           "recent to tell: {too_recent} of {denominator}",
+           lag_years=partition['lag_years'], too_recent=partition['counts']['too_recent'], denominator=partition['denominator']),
         "",
-        "This is a count partition, not a rate, and no proportion is computed from it at any sample size.",
+        en("This is a count partition, not a rate, and no proportion is computed from it at any sample size."),
     ]
     return lines
 
 
 def _time_to_lead_body(result: dict[str, Any]) -> list[str]:
     if result["not_computable"]:
-        lines = ["no person in this corpus holds a first-author slot"]
+        lines = [en("no person in this corpus holds a first-author slot")]
     else:
-        lines = [f"Years from first appearance to first lead slot, over {result['denominator']} people.", ""]
+        lines = [en("Years from first appearance to first lead slot, over {denominator} people.", denominator=result['denominator']), ""]
         for lag, count in result["distribution"].items():
-            lines.append(f"- {lag} year(s): {count} of {result['denominator']} people")
-        lines.append(f"- at 0 years (debuted in the lead slot): {result['count_at_zero']} of {result['denominator']}")
+            lines.append(en("- {lag} year(s): {count} of {denominator} people", lag=lag, count=count, denominator=result['denominator']))
+        lines.append(en("- at 0 years (debuted in the lead slot): {count_at_zero} of {denominator}", count_at_zero=result['count_at_zero'], denominator=result['denominator']))
         if result["suppressed"]:
-            lines += ["", f"Below the minimum for a median at n={result['denominator']}; the values are:"]
-            lines += [f"- {_fmt_person(item)}: {item['lag_years']} year(s)" for item in result["values"]]
+            lines += ["", en("Below the minimum for a median at n={denominator}; the values are:", denominator=result['denominator'])]
+            lines += [en("- {item}: {lag_years} year(s)", item=_fmt_person(item), lag_years=item['lag_years']) for item in result["values"]]
         else:
-            lines += ["", f"Median: {_fmt_number(result['median'])} year(s), over {result['denominator']} people."]
-    lines += ["", "People with no lead slot yet, printed beside the figure above:"]
+            lines += ["", en("Median: {median} year(s), over {denominator} people.", median=_fmt_number(result['median']), denominator=result['denominator'])]
+    lines += ["", en("People with no lead slot yet, printed beside the figure above:")]
     if result["still_without_lead"]:
         lines += [
-            f"- {_fmt_person(item)}: observed {item['years_observed']} year(s), no lead slot"
+            en("- {item}: observed {years_observed} year(s), no lead slot", item=_fmt_person(item), years_observed=item['years_observed'])
             for item in result["still_without_lead"]
         ]
     else:
-        lines.append("- none")
+        lines.append(en("- none"))
     return lines
 
 
 def _span_body(result: dict[str, Any], flips: Sequence[dict[str, Any]]) -> list[str]:
     lines = [
-        f"Cohort: {result['cohort_denominator']} people. "
-        f"Single-appearance people are counted separately ({result['single_appearance_count']}) and are "
-        f"never given a span.",
+        en("Cohort: {cohort_denominator} people. Single-appearance people are counted "
+           "separately ({single_appearance_count}) and are never given a span.",
+           cohort_denominator=result['cohort_denominator'], single_appearance_count=result['single_appearance_count']),
         "",
-        "Censoring: " + ", ".join(f"{key} {value}" for key, value in result["buckets"].items()),
+        en("Censoring: {buckets}", buckets=", ".join(f"{en(key)} {value}" for key, value in result["buckets"].items())),
         "",
     ]
     if result["suppressed"]:
         lines += [
-            f"Only {result['denominator']} uncensored spans, below the minimum for a median. "
-            f"The values are:",
+            en("Only {denominator} uncensored spans, below the minimum for a median. The "
+               "values are:",
+               denominator=result['denominator']),
         ]
     else:
         low, high = result["iqr"]
         lines += [
-            f"Median span: {_fmt_number(result['median'])} year(s) over {result['denominator']} "
-            f"uncensored people; IQR {_fmt_number(low)} to {_fmt_number(high)}.",
+            en("Median span: {median} year(s) over {denominator} uncensored people; IQR "
+               "{low} to {high}.",
+               median=_fmt_number(result['median']), denominator=result['denominator'], low=_fmt_number(low), high=_fmt_number(high)),
             "",
-            "Per person:",
+            en("Per person:"),
         ]
     for item in result["values"]:
         span = f"{item['span_years']}"
         if item["same_year"]:
-            span = "0 (same year)"
+            span = en("0 (same year)")
         lines.append(
-            f"- {_fmt_person(item)}: span {span} year(s) "
-            f"[{item['first_year']}-{item['last_year']}, {item['bucket']}]"
+            en("- {item}: span {span} year(s) [{first_year}-{last_year}, {bucket}]", item=_fmt_person(item), span=span, first_year=item['first_year'], last_year=item['last_year'], bucket=en(item['bucket']))
         )
-    lines += ["", "People who held a lead slot and later took the senior slot:"]
+    lines += ["", en("People who held a lead slot and later took the senior slot:")]
     if flips:
         lines += [
-            f"- {_fmt_person(flip)}: lead slot from {flip['first_lead_year']}, "
-            f"senior slot from {flip['first_last_year']}"
+            en("- {flip}: lead slot from {first_lead_year}, senior slot from "
+               "{first_last_year}",
+               flip=_fmt_person(flip), first_lead_year=flip['first_lead_year'], first_last_year=flip['first_last_year'])
             for flip in flips
         ]
     else:
-        lines.append("- none observed in this window")
+        lines.append(en("- none observed in this window"))
     return lines
 
 
 def _turnover_body(result: dict[str, Any]) -> list[str]:
     lines = [
-        "| year | active | arrivals | latest appearance |",
+        en("| year | active | arrivals | latest appearance |"),
         "|---|---|---|---|",
     ]
     for row in result["years"]:
-        note = " (right-censored — not departures)" if row["departures_right_censored"] else ""
-        lines.append(f"| {row['year']} | {row['active']} | {row['arrivals']} | {row['departures']}{note} |")
-    lines += ["", f"Counts are over the {result['denominator']} people in the roster."]
+        note = en(" (right-censored — not departures)") if row["departures_right_censored"] else ""
+        lines.append(en("| {year} | {active} | {arrivals} | {departures}{note} |", year=row['year'], active=row['active'], arrivals=row['arrivals'], departures=row['departures'], note=en(note)))
+    lines += ["", en("Counts are over the {denominator} people in the roster.", denominator=result['denominator'])]
     return lines
 
 
 def _pi_position_body(result: dict[str, Any]) -> list[str]:
     if not result["measured"]:
-        return ["Not measured on this corpus; see the caveat below."]
+        return [en("Not measured on this corpus; see the caveat below.")]
     coverage = result["email_coverage"]
     lines = []
     if result["suppressed"]:
         lines += [
-            f"Only {result['denominator']} records, below the minimum for an aggregate. "
-            f"Per record:",
+            en("Only {denominator} records, below the minimum for an aggregate. Per "
+               "record:",
+               denominator=result['denominator']),
             "",
-            "| PMID | year | byline position |",
+            en("| PMID | year | byline position |"),
             "|---|---|---|",
         ]
-        lines += [f"| {row['pmid']} | {row['year']} | {row['position']} |" for row in result["rows"]]
+        lines += [f"| {row['pmid']} | {row['year']} | {en(row['position'])} |" for row in result["rows"]]
     else:
         for key, count in result["counts"].items():
             pct = (result["percentages"] or {}).get(key)
             suffix = f" ({pct}%)" if pct is not None else ""
-            lines.append(f"- {key}: {count} of {result['denominator']} records{suffix}")
-    lines += ["", "Heuristic, reported beside its own coverage:"]
+            lines.append(en("- {key}: {count} of {denominator} records{suffix}", key=en(key), count=count, denominator=result['denominator'], suffix=suffix))
+    lines += ["", en("Heuristic, reported beside its own coverage:")]
     if result["corresponding"] is None:
         lines.append(
-            f"- corresponding-author flag: suppressed. Email coverage is "
-            f"{coverage['covered']} of {coverage['denominator']} records, so the flag is False for "
-            f"everyone for reasons unrelated to this researcher."
+            en("- corresponding-author flag: suppressed. Email coverage is {covered} of "
+               "{denominator} records, so the flag is False for everyone for reasons "
+               "unrelated to this researcher.",
+               covered=coverage['covered'], denominator=coverage['denominator'])
         )
     else:
         lines.append(
-            f"- the target researcher's own entry carries the corresponding-author flag on "
-            f"{result['corresponding']['count']} of {result['corresponding']['denominator']} records; "
-            f"email coverage is {coverage['covered']} of {coverage['denominator']} records"
+            en("- the target researcher's own entry carries the corresponding-author flag "
+               "on {count} of {denominator} records; email coverage is {covered} of "
+               "{denominator_2} records",
+               count=result['corresponding']['count'], denominator=result['corresponding']['denominator'], covered=coverage['covered'], denominator_2=coverage['denominator'])
         )
     return lines
 
 
 def _equal_contrib_body(result: dict[str, Any]) -> list[str]:
     if result["not_measurable"]:
-        return ["not measurable in this corpus"]
+        return [en("not measurable in this corpus")]
     lines = [
-        f"{result['count']} of {result['denominator']} records carry the equal-contribution attribute.",
+        en("{count} of {denominator} records carry the equal-contribution attribute.", count=result['count'], denominator=result['denominator']),
         "",
     ]
     for category, count in result["categories"].items():
-        lines.append(f"- {category.replace('_', ' ')}: {count} of {result['count']} flagged records")
-    lines += ["", "| PMID | year | flagged group size | includes lead slot | includes senior slot |", "|---|---|---|---|---|"]
+        lines.append(en("- {replace}: {count} of {count_2} flagged records", replace=en(category.replace('_', ' ')), count=count, count_2=result['count']))
+    lines += ["", en("| PMID | year | flagged group size | includes lead slot | includes senior slot |"), "|---|---|---|---|---|"]
     for row in result["papers"]:
         lines.append(
             f"| {row['pmid']} | {row['year']} | {row['group_size']} | "
@@ -2715,15 +2796,15 @@ def _equal_contrib_body(result: dict[str, Any]) -> list[str]:
 
 
 def _records_body(result: dict[str, Any]) -> list[str]:
-    lines = [f"{result['denominator']} records in total.", ""]
+    lines = [en("{denominator} records in total.", denominator=result['denominator']), ""]
     for row in result["years"]:
         notes = []
         if row["partial"]:
-            notes.append("PARTIAL")
+            notes.append(en("PARTIAL"))
         if row["indexing_lag"]:
-            notes.append("subject to PubMed indexing lag")
+            notes.append(en("subject to PubMed indexing lag"))
         suffix = f"  ({'; '.join(notes)})" if notes else ""
-        lines.append(f"- {row['year']}: {row['count']}{suffix}")
+        lines.append(en("- {year}: {count}{suffix}", year=row['year'], count=row['count'], suffix=suffix))
 
     # Round four. Rounds one through three refused a fitted slope here, and the
     # reason they gave — a handful of right-censored integer points do not
@@ -2731,7 +2812,7 @@ def _records_body(result: dict[str, Any]) -> list[str]:
     # interval that makes it visible and refuses outright below four points.
     # The slope is deliberately the *shortest* part of what follows.
     fit = fit_trend(result["years"])
-    lines.extend(["", "**Direction over these years.**", fit["basis"]])
+    lines.extend(["", en("**Direction over these years.**"), en(fit["basis"])])
     return lines
 
 
@@ -2739,70 +2820,75 @@ def _team_size_body(result: dict[str, Any]) -> list[str]:
     lines = []
     if result["suppressed"]:
         lines += [
-            f"Only {result['denominator']} records, below the minimum for a median. Author counts: "
-            f"{', '.join(str(v) for v in result['values'])}.",
+            en("Only {denominator} records, below the minimum for a median. Author "
+               "counts: {items}.",
+               denominator=result['denominator'], items=', '.join(str(v) for v in result['values'])),
         ]
     else:
         low, high = result["iqr"]
         lines += [
-            f"Median {_fmt_number(result['median'])} authors per record over {result['denominator']} "
-            f"records; IQR {_fmt_number(low)} to {_fmt_number(high)}; range {result['min']} to "
-            f"{result['max']}.",
+            en("Median {median} authors per record over {denominator} records; IQR {low} "
+               "to {high}; range {min} to {max}.",
+               median=_fmt_number(result['median']), denominator=result['denominator'], low=_fmt_number(low), high=_fmt_number(high), min=result['min'], max=result['max']),
         ]
     lines.append(
-        f"- records with 20 or more authors: {result['large_team_count']} of {result['denominator']} "
-        f"— {_pmid_list(result['large_team_pmids'])}"
+        en("- records with 20 or more authors: {large_team_count} of {denominator} — "
+           "{large_team_pmids}",
+           large_team_count=result['large_team_count'], denominator=result['denominator'], large_team_pmids=_pmid_list(result['large_team_pmids']))
     )
     subset = result["subset"]
     if subset["suppressed"]:
         lines.append(
-            f"- records led by a lead-trainee or support candidate: {subset['denominator']}, below the "
-            f"minimum for a separate median"
+            en("- records led by a lead-trainee or support candidate: {denominator}, "
+               "below the minimum for a separate median",
+               denominator=subset['denominator'])
         )
     else:
         lines.append(
-            f"- records led by a lead-trainee or support candidate: median "
-            f"{_fmt_number(subset['median'])} authors over {subset['denominator']} records"
+            en("- records led by a lead-trainee or support candidate: median {median} "
+               "authors over {denominator} records",
+               median=_fmt_number(subset['median']), denominator=subset['denominator'])
         )
     return lines
 
 
 def _venue_body(result: dict[str, Any]) -> list[str]:
-    lines = [f"Journal strings over {result['denominator']} records, exactly as recorded.", ""]
+    lines = [en("Journal strings over {denominator} records, exactly as recorded.", denominator=result['denominator']), ""]
     for name, count in result["repeated"]:
-        lines.append(f"- {name}: {count} of {result['denominator']} records")
+        lines.append(en("- {name}: {count} of {denominator} records", name=name, count=count, denominator=result['denominator']))
     if not result["repeated"]:
-        lines.append("- no journal string appears more than once")
-    lines.append(f"- {result['singleton_count']} journal string(s) appear once")
+        lines.append(en("- no journal string appears more than once"))
+    lines.append(en("- {singleton_count} journal string(s) appear once", singleton_count=result['singleton_count']))
     if result["missing_journal_count"]:
-        lines.append(f"- {result['missing_journal_count']} record(s) carry no journal string")
+        lines.append(en("- {missing_journal_count} record(s) carry no journal string", missing_journal_count=result['missing_journal_count']))
     return lines
 
 
 def _affiliation_body(result: dict[str, Any]) -> list[str]:
     lines = [
-        f"Affiliation strings appearing on at least {result['min_papers']} of "
-        f"{result['denominator']} records, printed verbatim and ungrouped:",
+        en("Affiliation strings appearing on at least {min_papers} of {denominator} "
+           "records, printed verbatim and ungrouped:",
+           min_papers=result['min_papers'], denominator=result['denominator']),
         "",
     ]
     if result["strings"]:
-        lines += [f"- `{text}` — {count} records" for text, count in result["strings"]]
+        lines += [en("- `{text}` — {count} records", text=text, count=count) for text, count in result["strings"]]
     else:
-        lines.append(f"- no affiliation string reaches {result['min_papers']} records")
-    lines += ["", "Coverage per year (author entries carrying any affiliation string):", ""]
+        lines.append(en("- no affiliation string reaches {min_papers} records", min_papers=result['min_papers']))
+    lines += ["", en("Coverage per year (author entries carrying any affiliation string):"), ""]
     for row in result["coverage_by_year"]:
         if row["total"] == 0 or row["covered"] == 0:
-            lines.append(f"- {row['year']}: no affiliation data")
+            lines.append(en("- {year}: no affiliation data", year=row['year']))
         else:
-            lines.append(f"- {row['year']}: {row['covered']} of {row['total']} author entries")
+            lines.append(en("- {year}: {covered} of {total} author entries", year=row['year'], covered=row['covered'], total=row['total']))
     return lines
 
 
 def _titles_body(result: dict[str, Any]) -> list[str]:
-    lines = [f"All {result['denominator']} record titles, verbatim, by year.", ""]
+    lines = [en("All {denominator} record titles, verbatim, by year.", denominator=result['denominator']), ""]
     for group in result["years"]:
         lines.append(f"**{group['year']}**")
-        lines += [f"- {record['title']} (PMID {record['pmid']})" for record in group["records"]]
+        lines += [en("- {title} (PMID {pmid})", title=record['title'], pmid=record['pmid']) for record in group["records"]]
         lines.append("")
     return lines
 
@@ -2833,11 +2919,11 @@ def _fmt_score(value: Any, digits: int = 2) -> str:
 def _fmt_input(value: Any) -> str:
     """One raw input, rendered so a dict or a list stays readable inside a bullet."""
     if value is None:
-        return "not recorded"
+        return en("not recorded")
     if isinstance(value, Mapping):
-        return "; ".join(f"{key} {item}" for key, item in value.items()) or "none"
+        return "; ".join(f"{key} {item}" for key, item in value.items()) or en("none")
     if isinstance(value, (list, tuple)):
-        return ", ".join(str(item) for item in value) or "none"
+        return ", ".join(str(item) for item in value) or en("none")
     if isinstance(value, float):
         return _fmt_score(value, 2)
     return str(value)
@@ -2879,72 +2965,77 @@ def _impact_body(impact: dict[str, Any] | None, note: str,
     """Section 15. The citation numbers, or the reason there are none."""
     if impact is None:
         return [
-            "Not computed: no citation data was joined to this corpus.",
+            en("Not computed: no citation data was joined to this corpus."),
             "",
-            f"Reason: {note or _NO_CITATIONS_NOTE}",
+            en("Reason: {note}", note=en(note or _NO_CITATIONS_NOTE)),
             "",
-            "This section is the only thing that is missing. Citation counts are fetched "
-            "separately and are not part of the corpus, so their absence costs this section and "
-            "the two citation components of Section 16, and changes nothing in Sections 1 to 13.",
+            en("This section is the only thing that is missing. Citation counts are fetched "
+               "separately and are not part of the corpus, so their absence costs this section and "
+               "the two citation components of Section 16, and changes nothing in Sections 1 to 13."),
         ] + _reference_position_lines(reference, reference_note)
 
     generated = impact.get("generated_at")
-    when = f"fetched {generated}" if generated else "fetch date not recorded in the citation file"
+    when = en("fetched {generated}", generated=generated) if generated else en("fetch date not recorded in the citation file")
     lines = [
-        f"Citation counts joined onto the {impact['denominator']} usable records of this corpus "
-        f"({when}).",
+        en("Citation counts joined onto the {denominator} usable records of this "
+           "corpus ({when}).",
+           denominator=impact['denominator'], when=when),
         "",
     ]
 
     if impact["not_computable"]:
         lines += [
-            f"No citation count was retrieved for any of the {impact['denominator']} records. That "
-            "is a statement about the lookup, not about the papers: nothing here says these "
-            "records are uncited.",
+            en("No citation count was retrieved for any of the {denominator} records. "
+               "That is a statement about the lookup, not about the papers: nothing here "
+               "says these records are uncited.",
+               denominator=impact['denominator']),
             "",
         ]
     else:
         ledger = impact["record_counts"]
         lines += [
-            f"- coverage: {impact['covered']} of {impact['denominator']} records carry a citation "
-            f"count",
-            f"- retrieved from: {_fmt_input(impact['sources'])}",
-            f"- total citations over covered records: {impact['total_citations']}",
+            en("- coverage: {covered} of {denominator} records carry a citation count", covered=impact['covered'], denominator=impact['denominator']),
+            en("- retrieved from: {sources}", sources=_fmt_input(impact['sources'])),
+            en("- total citations over covered records: {total_citations}", total_citations=impact['total_citations']),
         ]
         if impact["suppressed"]:
             lines += [
-                f"- below the minimum for an aggregate at {impact['covered']} covered records, so "
-                f"the h-index, the i10-index and the median are withheld. The counts themselves, "
-                f"ascending and deliberately not tied back to any record: "
-                f"{', '.join(str(value) for value in impact['values']) or 'none'}",
+                en("- below the minimum for an aggregate at {covered} covered records, so the "
+                   "h-index, the i10-index and the median are withheld. The counts "
+                   "themselves, ascending and deliberately not tied back to any record: "
+                   "{items}",
+                   covered=impact['covered'], items=', '.join(str(value) for value in impact['values']) or en('none')),
             ]
         else:
             low, high = impact["iqr"]
             lines += [
-                f"- h-index over covered records: {impact['h_index']}",
-                f"- i10-index (covered records with at least 10 citations): {impact['i10_index']}",
-                f"- median citations per covered record: {_fmt_number(impact['median_citations'])}; "
-                f"IQR {_fmt_number(low)} to {_fmt_number(high)}",
+                en("- h-index over covered records: {h_index}", h_index=impact['h_index']),
+                en("- i10-index (covered records with at least 10 citations): {i10_index}", i10_index=impact['i10_index']),
+                en("- median citations per covered record: {median_citations}; IQR {low} to "
+                   "{high}",
+                   median_citations=_fmt_number(impact['median_citations']), low=_fmt_number(low), high=_fmt_number(high)),
             ]
         lines += [
-            f"- fetched-record ledger: {ledger['total']} records in the citation file, "
-            f"{ledger['matched']} matched onto this corpus, {ledger['unmatched']} matched nothing, "
-            f"{ledger['duplicate']} duplicate, {ledger['invalid']} unreadable",
+            en("- fetched-record ledger: {total} records in the citation file, {matched} "
+               "matched onto this corpus, {unmatched} matched nothing, {duplicate} "
+               "duplicate, {invalid} unreadable",
+               total=ledger['total'], matched=ledger['matched'], unmatched=ledger['unmatched'], duplicate=ledger['duplicate'], invalid=ledger['invalid']),
         ]
         if impact["lower_bound"]:
             lines += [
-                "- partial coverage: the total, the h-index and the i10-index above are floors. "
-                "The median is not a floor and must not be read as one.",
+                en("- partial coverage: the total, the h-index and the i10-index above are floors. "
+                   "The median is not a floor and must not be read as one."),
             ]
         if impact["mixed_sources"]:
             lines += [
-                "- these counts come from more than one citation source. The three sources sit on "
-                "three different citation graphs and do not agree with each other, so an aggregate "
-                "mixing them is not comparable with one taken from any single source.",
+                en("- these counts come from more than one citation source. The three sources sit on "
+                   "three different citation graphs and do not agree with each other, so an aggregate "
+                   "mixing them is not comparable with one taken from any single source."),
             ]
         lines += [
-            f"- records with no citation count retrieved: "
-            f"{len(impact['uncovered_pmids'])} — {_pmid_list(impact['uncovered_pmids'])}",
+            en("- records with no citation count retrieved: {n_uncovered_pmids} — "
+               "{uncovered_pmids}",
+               n_uncovered_pmids=len(impact['uncovered_pmids']), uncovered_pmids=_pmid_list(impact['uncovered_pmids'])),
         ]
     lines += _reference_position_lines(reference, reference_note)
     return lines
@@ -2968,10 +3059,10 @@ def _reference_position_lines(reference: Mapping[str, Any] | None, note: str) ->
     if reference is None:
         return [
             "",
-            "**Position in an external reference population.** Not computed.",
-            f"Reason: {note or 'run `cite --percentile` to fetch one.'}",
-            "A citation count with no reference cell beside it is not a low count; "
-            "it is a count whose context was never fetched.",
+            en("**Position in an external reference population.** Not computed."),
+            en("Reason: {note}", note=en(note or en('run `cite --percentile` to fetch one.'))),
+            en("A citation count with no reference cell beside it is not a low count; "
+               "it is a count whose context was never fetched."),
         ]
 
     counts = reference.get("denominator") or {}
@@ -2979,13 +3070,15 @@ def _reference_position_lines(reference: Mapping[str, Any] | None, note: str) ->
     located = counts.get("papers_located", 0)
     lines = [
         "",
-        "**Position in an external reference population.**",
-        f"- placed: {located} of {total} records sit inside a cell of every OpenAlex work "
-        f"sharing their topic and publication year",
-        f"- method: {reference.get('method', '')}",
-        f"- smallest cell used: {reference.get('min_reference_population', '')} works "
-        f"(a floor on arithmetic resolution, not a claim of representativeness)",
-        f"- collected: {reference.get('generated_at', 'date not recorded')}",
+        en("**Position in an external reference population.**"),
+        en("- placed: {located} of {total} records sit inside a cell of every "
+           "OpenAlex work sharing their topic and publication year",
+           located=located, total=total),
+        en("- method: {method}", method=en(reference.get('method', ''))),
+        en("- smallest cell used: {min_reference_population} works (a floor on "
+           "arithmetic resolution, not a claim of representativeness)",
+           min_reference_population=reference.get('min_reference_population', '')),
+        en("- collected: {generated_at}", generated_at=reference.get('generated_at', en('date not recorded'))),
     ]
 
     by_status = counts.get("by_status") or {}
@@ -2994,10 +3087,11 @@ def _reference_position_lines(reference: Mapping[str, Any] | None, note: str) ->
     if unplaced:
         lines += [
             "",
-            f"{total - located} records carry no percentile. Each reason below is a different "
-            "thing that did not happen, and none of them is a low position:",
+            en("{value} records carry no percentile. Each reason below is a different "
+               "thing that did not happen, and none of them is a low position:",
+               value=total - located),
         ]
-        lines += [f"- {n} — {reasons.get(status, status)}" for status, n in unplaced]
+        lines += [en("- {n} — {reason}", n=n, reason=en(reasons.get(status, status))) for status, n in unplaced]
     return lines
 
 
@@ -3017,43 +3111,48 @@ def _stars_line(stars: Mapping[str, Any] | None) -> list[str]:
     count = stars.get("stars")
     if count is None:
         return [
-            f"- star band: none. {stars.get('unavailable') or 'no reason recorded'}",
-            f"- a score that was not computed is never coarsened into 0 of {STAR_MAX} stars; "
-            "there is no zero band on this scale and an absent score is not a low one",
+            en("- star band: none. {unavailable}", unavailable=en(stars.get('unavailable') or 'no reason recorded')),
+            en("- a score that was not computed is never coarsened into 0 of {star_max} "
+               "stars; there is no zero band on this scale and an absent score is not a "
+               "low one",
+               star_max=STAR_MAX),
         ]
     band = stars.get("band") or [0, 0]
-    closed = " (closed at the upper edge)" if stars.get("band_closed_at_top") else ""
+    closed = en(" (closed at the upper edge)") if stars.get("band_closed_at_top") else ""
     denominator = stars.get("denominator")
-    over = f" over {denominator} scored component(s)" if denominator else ""
+    over = en(" over {denominator} scored component(s)", denominator=denominator) if denominator else ""
     return [
-        f"- star band: {'★' * int(count)}{'☆' * (STAR_MAX - int(count))} — {int(count)} of "
-        f"{STAR_MAX}, from a score of {_fmt_score(stars.get('score'), 1)} out of 100{over}",
-        f"- the band this score fell in: {band[0]:g} to {band[1]:g} points{closed}, one of "
-        f"{STAR_MAX} equal bands {stars.get('band_width', 0):g} points wide",
-        f"- every band edge, printed so it can be disagreed with: {stars.get('scale_note', '')}",
+        en("- star band: {value}{value_2} — {count} of {star_max}, from a score of "
+           "{score} out of 100{over}",
+           value='★' * int(count), value_2='☆' * (STAR_MAX - int(count)), count=int(count), star_max=STAR_MAX, score=_fmt_score(stars.get('score'), 1), over=over),
+        en("- the band this score fell in: {band_0:g} to {band_1:g} points{closed}, "
+           "one of {star_max} equal bands {band_width:g} points wide",
+           band_0=band[0], band_1=band[1], closed=closed, star_max=STAR_MAX, band_width=stars.get('band_width', 0)),
+        en("- every band edge, printed so it can be disagreed with: {scale_note}", scale_note=stars.get('scale_note', '')),
     ]
 
 
 def _score_body(score: dict[str, Any] | None, stars: dict[str, Any] | None = None) -> list[str]:
     """Section 16. The score, its star band, its inputs, and the weight table."""
     if score is None:
-        return ["Not computed: no score was supplied to the renderer."]
+        return [en("Not computed: no score was supplied to the renderer.")]
 
     if score["suppressed"]:
         lines = [
-            f"No score. Only {score['denominator']} of {score['components_registered']} registered "
-            f"components carried both data and a non-zero weight, below the minimum of "
-            f"{score['min_components']}; total weight in effect is "
-            f"{_fmt_score(score['weight_total'])}. Below that floor a \"composite\" is one or two "
-            f"metrics with a change of scale, and printing it out of 100 would imply more evidence "
-            f"than exists. The parts survive below; the aggregate does not, and is not defaulted "
-            f"to zero.",
+            en("No score. Only {denominator} of {components_registered} registered "
+               "components carried both data and a non-zero weight, below the minimum of "
+               "{min_components}; total weight in effect is {weight_total}. Below that "
+               "floor a \"composite\" is one or two metrics with a change of scale, and "
+               "printing it out of 100 would imply more evidence than exists. The parts "
+               "survive below; the aggregate does not, and is not defaulted to zero.",
+               denominator=score['denominator'], components_registered=score['components_registered'], min_components=score['min_components'], weight_total=_fmt_score(score['weight_total'])),
         ]
     else:
         lines = [
-            f"Score: {_fmt_score(score['score'], 1)} out of 100, computed over "
-            f"{score['denominator']} of {score['components_registered']} registered components, "
-            f"total weight {_fmt_score(score['weight_total'])}.",
+            en("Score: {score} out of 100, computed over {denominator} of "
+               "{components_registered} registered components, total weight "
+               "{weight_total}.",
+               score=_fmt_score(score['score'], 1), denominator=score['denominator'], components_registered=score['components_registered'], weight_total=_fmt_score(score['weight_total'])),
         ]
 
     star_lines = _stars_line(stars)
@@ -3062,7 +3161,7 @@ def _score_body(score: dict[str, Any] | None, stars: dict[str, Any] | None = Non
 
     lines += [
         "",
-        "| component | source | raw | normalised | weight | contribution |",
+        en("| component | source | raw | normalised | weight | contribution |"),
         "|---|---|---|---|---|---|",
     ]
     for item in score["components"]:
@@ -3072,53 +3171,54 @@ def _score_body(score: dict[str, Any] | None, stars: dict[str, Any] | None = Non
             f"{_fmt_score(item['contribution'])} |"
         )
     if not score["components"]:
-        lines.append("| (none carried data) | - | n/a | n/a | n/a | n/a |")
+        lines.append(en("| (none carried data) | - | n/a | n/a | n/a | n/a |"))
     lines += [
         "",
-        "Components are listed in registration order and are never reordered by contribution, "
-        "weight or value. Contributions are `100 x weight x normalised / total weight` and sum to "
-        "the score before rounding, so the arithmetic can be redone by hand without rerunning "
-        "anything.",
+        en("Components are listed in registration order and are never reordered by contribution, "
+           "weight or value. Contributions are `100 x weight x normalised / total weight` and sum to "
+           "the score before rounding, so the arithmetic can be redone by hand without rerunning "
+           "anything."),
         "",
-        "Inputs behind each component, as consumed:",
+        en("Inputs behind each component, as consumed:"),
         "",
     ]
     for item in score["components"]:
         inputs = ", ".join(
             f"{key}={_fmt_input(value)}" for key, value in (item["raw_inputs"] or {}).items()
         )
-        lines.append(f"- **{item['name']}** — {inputs or 'no raw inputs recorded'}")
-        lines.append(f"- normalisation basis: {item['basis']}")
+        lines.append(en("- **{name}** — {inputs}", name=item['name'], inputs=inputs or en('no raw inputs recorded')))
+        lines.append(en("- normalisation basis: {basis}", basis=en(item['basis'])))
     if not score["components"]:
-        lines.append("- none")
+        lines.append(en("- none"))
 
     lines += [
         "",
-        "Weight table in effect, printed verbatim including the components that carried no data. "
-        "This is the whole of what the score assumes:",
+        en("Weight table in effect, printed verbatim including the components that carried no data. "
+           "This is the whole of what the score assumes:"),
         "",
-        "| component | weight |",
+        en("| component | weight |"),
         "|---|---|",
     ]
     for name, weight in score["weights_used"].items():
         lines.append(f"| {name} | {_fmt_score(weight)} |")
     lines += [
         "",
-        "Edit it under `scoring.weights` in the config file. Only the ratios matter, so scaling "
-        "the whole table changes nothing; setting a component to 0.0 drops it from the score.",
+        en("Edit it under `scoring.weights` in the config file. Only the ratios matter, so scaling "
+           "the whole table changes nothing; setting a component to 0.0 drops it from the score."),
         "",
-        "Components with no usable data. These are excluded from the weighted denominator "
-        "entirely and are never scored as zero — a lookup that returned nothing is not a result of "
-        "nothing:",
+        en("Components with no usable data. These are excluded from the weighted denominator "
+           "entirely and are never scored as zero — a lookup that returned nothing is not a result of "
+           "nothing:"),
         "",
     ]
     if score["unavailable"]:
         lines += [
-            f"- **{name}** — {score['unavailable_reasons'].get(name, 'no reason recorded')}"
+            en("- **{name}** — {reason}", name=name,
+               reason=en(score['unavailable_reasons'].get(name) or 'no reason recorded'))
             for name in score["unavailable"]
         ]
     else:
-        lines.append("- none; every registered component carried data")
+        lines.append(en("- none; every registered component carried data"))
     return lines
 
 
@@ -3145,73 +3245,74 @@ def _score_prose() -> list[str]:
     that says how they fit together.
     """
     lines = [
-        "A score is one number about one corpus under one weight table. It is not a position. No "
-        "weighting of these components is justified by this data, and this report does not claim "
-        "to have found one — it answers that objection by refusing to hide the weights instead. "
-        "The default table is flat, every component counting the same, because a flat table is "
-        "the only default that asserts nothing; a reader who leaves it alone has chosen \"count "
-        "everything equally\", which is a position they can defend.",
+        en("A score is one number about one corpus under one weight table. It is not a position. No "
+           "weighting of these components is justified by this data, and this report does not claim "
+           "to have found one — it answers that objection by refusing to hide the weights instead. "
+           "The default table is flat, every component counting the same, because a flat table is "
+           "the only default that asserts nothing; a reader who leaves it alone has chosen \"count "
+           "everything equally\", which is a position they can defend."),
         "",
-        "Every normalisation anchor is a declared constant printed in the basis line of the "
-        "component that uses it. Nothing is normalised against a population of researchers, so a "
-        "percentile is not merely withheld here, it is uncomputable: the calculation never holds "
-        "more than one corpus. Two of these numbers side by side are still not an ordering until "
-        "a reader supplies the judgement, which is where that judgement belongs.",
+        en("Every normalisation anchor is a declared constant printed in the basis line of the "
+           "component that uses it. Nothing is normalised against a population of researchers, so a "
+           "percentile is not merely withheld here, it is uncomputable: the calculation never holds "
+           "more than one corpus. Two of these numbers side by side are still not an ordering until "
+           "a reader supplies the judgement, which is where that judgement belongs."),
         "",
-        "The score is also not comparable across fields. Citation rates differ between fields by "
-        "an order of magnitude and no field normalisation is applied, for the reason given in the "
-        "first register below.",
+        en("The score is also not comparable across fields. Citation rates differ between fields by "
+           "an order of magnitude and no field normalisation is applied, for the reason given in the "
+           "first register below."),
         "",
-        f"**The star band.** {STAR_BASIS}",
+        en("**The star band.** {star_basis}", star_basis=en(STAR_BASIS)),
         "",
-        "A star count adds no information to the score above it and subtracts a good deal: it is "
-        "the same number with most of its resolution thrown away, printed because it is asked "
-        "for and printed beside its own band edges so it can be checked against the score. It is "
-        "not a position among researchers, it was not calibrated against any group of them, and "
-        "two corpora carrying the same star count are two scores that landed in one 20-point "
-        "band — which is a fact about the band, not a finding about the two.",
+        en("A star count adds no information to the score above it and subtracts a good deal: it is "
+           "the same number with most of its resolution thrown away, printed because it is asked "
+           "for and printed beside its own band edges so it can be checked against the score. It is "
+           "not a position among researchers, it was not calibrated against any group of them, and "
+           "two corpora carrying the same star count are two scores that landed in one 20-point "
+           "band — which is a fact about the band, not a finding about the two."),
         "",
-        "**Not implemented, because the input cannot be obtained.** These would be reopened on "
-        "their merits if the data became available. Do not read them as verdicts.",
+        en("**Not implemented, because the input cannot be obtained.** These would be reopened on "
+           "their merits if the data became available. Do not read them as verdicts."),
         "",
     ]
-    lines += [f"- **{name}** — {reason}" for name, reason in SCORING_EXCLUSIONS["not_implemented"]]
+    lines += _register_lines(SCORING_EXCLUSIONS["not_implemented"])
     lines += [
         "",
-        "One of those has moved since it was written, and only part way. Journal Impact Factor, "
-        "JCR quartile and CAS partition are still not shipped with this toolkit and are still "
-        "never fetched by it — there is no crawler in this package. Section 18 joins them from a "
-        "table you fill in by hand, prints the edition and the retrieval date beside every "
-        "number, and prints \"未提供对照表\" when there is no table. Nothing about that changes "
-        "what the register says: the toolkit supplies no such data, and none of it enters the "
-        "score above.",
+        en("One of those has moved since it was written, and only part way. Journal Impact Factor, "
+           "JCR quartile and CAS partition are still not shipped with this toolkit and are still "
+           "never fetched by it — there is no crawler in this package. Section 18 joins them from a "
+           "table you fill in by hand, prints the edition and the retrieval date beside every "
+           "number, and prints \"{marker}\" when there is no table. Nothing about that changes "
+           "what the register says: the toolkit supplies no such data, and none of it enters the "
+           "score above.",
+           marker=zh(NO_TABLE_MARKER)),
         "",
-        "**Refused by `composite_score` itself.** A better data source would not change these "
-        "answers. This register belongs to the scoring function, which is handed one corpus and "
-        "can therefore produce no position of any kind — that is a fact about its signature. The "
-        "star band above is produced elsewhere, by `profile.ranking`, out of the number this "
-        "function returned; the register immediately after this one is the one that governs it.",
+        en("**Refused by `composite_score` itself.** A better data source would not change these "
+           "answers. This register belongs to the scoring function, which is handed one corpus and "
+           "can therefore produce no position of any kind — that is a fact about its signature. The "
+           "star band above is produced elsewhere, by `profile.ranking`, out of the number this "
+           "function returned; the register immediately after this one is the one that governs it."),
         "",
     ]
-    lines += [f"- **{name}** — {reason}" for name, reason in SCORING_EXCLUSIONS["refused_by_design"]]
+    lines += _register_lines(SCORING_EXCLUSIONS["refused_by_design"])
     lines += [
         "",
-        "**Refused by `profile.ranking`, which is where ordering is now done.** This is the "
-        "current register for anything that turns a score into a position. Stars are produced, "
-        "and on a side-by-side page so is a letter, which is the same five bands relabelled "
-        "rather than a second cut. A rank among the corpora on such a page is produced and a "
-        "percentile of the score is not. That split is deliberate, and it is argued here rather "
-        "than left to be discovered.",
+        en("**Refused by `profile.ranking`, which is where ordering is now done.** This is the "
+           "current register for anything that turns a score into a position. Stars are produced, "
+           "and on a side-by-side page so is a letter, which is the same five bands relabelled "
+           "rather than a second cut. A rank among the corpora on such a page is produced and a "
+           "percentile of the score is not. That split is deliberate, and it is argued here rather "
+           "than left to be discovered."),
         "",
     ]
-    lines += [f"- **{name}** — {reason}" for name, reason in RANKING_EXCLUSIONS["refused_by_design"]]
+    lines += _register_lines(RANKING_EXCLUSIONS["refused_by_design"])
     lines += [
         "",
-        "**Not computable here, for want of a reference population.** A different sentence from "
-        "the one above: no decision is being defended, an input simply does not exist.",
+        en("**Not computable here, for want of a reference population.** A different sentence from "
+           "the one above: no decision is being defended, an input simply does not exist."),
         "",
     ]
-    lines += [f"- **{name}** — {reason}" for name, reason in RANKING_EXCLUSIONS["not_computable_here"]]
+    lines += _register_lines(RANKING_EXCLUSIONS["not_computable_here"])
     return lines
 
 
@@ -3228,6 +3329,15 @@ _NO_THESIS_ROSTER_NOTE = (
     "no degree-thesis roster was passed to build_report, and none was looked for. Pass one with "
     "`check-your-advisor profile --thesis-roster <path.csv>`."
 )
+
+#: What Section 18 prints in place of a journal table nobody supplied, and what
+#: Section 16 quotes when it says so. Chinese-source, because it was written for
+#: the Chinese page first; the English page prints its catalog translation.
+NO_TABLE_MARKER = "未提供对照表"
+
+#: The cell for a journal-risk column nobody collected, in the table and in the
+#: block below it.
+NOT_COLLECTED_MARKER = "未采集"
 
 _NO_JOURNAL_TABLE_NOTE = (
     "no journal metric table was passed to build_report, and none was looked for. Pass one with "
@@ -3259,20 +3369,20 @@ def _cohesion_body(data: dict[str, Any]) -> list[str]:
     """Section 19's computed half: the partition, and nothing derived from it."""
     if data.get("suppressed"):
         return [
-            f"- not partitioned: {data['denominator']} records, below the floor of {data['min_n']}",
-            "- below that floor the partition says nothing. Four records sharing no co-author are "
-            "four clusters whether or not they are four people.",
+            en("- not partitioned: {denominator} records, below the floor of {min_n}", denominator=data['denominator'], min_n=data['min_n']),
+            en("- below that floor the partition says nothing. Four records sharing no co-author are "
+               "four clusters whether or not they are four people."),
         ]
 
     clusters = data["clusters"]
     lines = [
-        f"- records partitioned: {data['denominator']}",
-        f"- clusters joined by a shared co-author: {data['n_clusters']}",
-        f"- largest cluster: {data['largest_size']} of {data['denominator']} records",
-        f"- clusters holding a single record: {data['singleton_clusters']}",
+        en("- records partitioned: {denominator}", denominator=data['denominator']),
+        en("- clusters joined by a shared co-author: {n_clusters}", n_clusters=data['n_clusters']),
+        en("- largest cluster: {largest_size} of {denominator} records", largest_size=data['largest_size'], denominator=data['denominator']),
+        en("- clusters holding a single record: {singleton_clusters}", singleton_clusters=data['singleton_clusters']),
         "",
-        "Clusters are listed largest first so the page is readable. That order is not a ranking "
-        "and carries no claim that the largest one is the real person.",
+        en("Clusters are listed largest first so the page is readable. That order is not a ranking "
+           "and carries no claim that the largest one is the real person."),
         "",
     ]
     for number, cluster in enumerate(clusters, start=1):
@@ -3282,24 +3392,23 @@ def _cohesion_body(data: dict[str, Any]) -> list[str]:
         if cluster["year_range"]:
             low, high = cluster["year_range"]
             span = f", {low}" if low == high else f", {low}–{high}"
-        lines.append(f"- cluster {number}: {cluster['size']} records{span}")
+        lines.append(en("- cluster {number}: {size} records{span}", number=number, size=cluster['size'], span=span))
         for venue in cluster["journals"][:6]:
             suffix = f" x{venue['count']}" if venue["count"] > 1 else ""
-            lines.append(f"    - {venue['journal']}{suffix}")
+            lines.append(en("    - {journal}{suffix}", journal=venue['journal'], suffix=suffix))
         extra = len(cluster["journals"]) - 6
         if extra > 0:
-            lines.append(f"    - ...and {extra} further journal(s)")
+            lines.append(en("    - ...and {extra} further journal(s)", extra=extra))
         recurring = cluster["recurring_people"][:4]
         if recurring:
             joined = ", ".join(f"{p['name']} ({p['n_records']})" for p in recurring)
-            lines.append(f"    - held together by: {joined}")
+            lines.append(en("    - held together by: {joined}", joined=joined))
     singletons = [c for c in clusters if not c["detailed"]]
     if singletons:
         venues = [c["journals"][0]["journal"] for c in singletons if c["journals"]]
         lines.append(
-            f"- {len(singletons)} single-record cluster(s), in: "
-            + (", ".join(venues[:8]) or "no journal recorded")
-            + ("..." if len(venues) > 8 else "")
+            en("- {n_singletons} single-record cluster(s), in: {venues}", n_singletons=len(singletons),
+               venues=(", ".join(venues[:8]) or en("no journal recorded")) + ("..." if len(venues) > 8 else ""))
         )
     return lines
 
@@ -3307,77 +3416,80 @@ def _cohesion_body(data: dict[str, Any]) -> list[str]:
 def _cohesion_prose() -> list[str]:
     """Section 19's fixed text: what the partition is, and what it is not."""
     return [
-        "Remove the PI, who is on every record by construction, and ask which records are still "
-        "tied together by a shared co-author. One person's output is tied together by the people "
-        "they work with. Two people who share a name have no reason to share anyone else.",
+        en("Remove the PI, who is on every record by construction, and ask which records are still "
+           "tied together by a shared co-author. One person's output is tied together by the people "
+           "they work with. Two people who share a name have no reason to share anyone else."),
         "",
-        "**This section does not decide anything, and it is not a gate.** No threshold is applied, "
-        "because the measurements do not support one. Counted with this exact function, a corpus "
-        "known to hold at least five different researchers split into 15 clusters with the largest "
-        "holding 21% of records; two better-filtered corpora of the same kind split into 16 and 10 "
-        "clusters holding 35% and 42%. The cluster count separates none of them. Any real "
-        "researcher accumulates one-off collaborators and each becomes a single-record cluster, so "
-        "the count tracks how many one-off papers there are, not how many people are in the "
-        "corpus. A cut-off guessed from numbers like those would refuse real broad-ranging "
-        "researchers, which is a worse failure than the one it would prevent.",
+        en("**This section does not decide anything, and it is not a gate.** No threshold is applied, "
+           "because the measurements do not support one. Counted with this exact function, a corpus "
+           "known to hold at least five different researchers split into 15 clusters with the largest "
+           "holding 21% of records; two better-filtered corpora of the same kind split into 16 and 10 "
+           "clusters holding 35% and 42%. The cluster count separates none of them. Any real "
+           "researcher accumulates one-off collaborators and each becomes a single-record cluster, so "
+           "the count tracks how many one-off papers there are, not how many people are in the "
+           "corpus. A cut-off guessed from numbers like those would refuse real broad-ranging "
+           "researchers, which is a worse failure than the one it would prevent."),
         "",
-        "What separates \"one person working across fields\" from \"several people sharing a name\" "
-        "is whether the clusters' subject matter is related, and this toolkit classifies no "
-        "subjects — see Section 14 for why MeSH does not rescue that. So the clusters and their "
-        "journals are printed, and the reading is yours. It is usually not subtle: clusters in "
-        "oncology, in analytical chemistry, in soil microbiology and in machine learning are not "
-        "one surgeon's decade.",
+        en("What separates \"one person working across fields\" from \"several people sharing a name\" "
+           "is whether the clusters' subject matter is related, and this toolkit classifies no "
+           "subjects — see Section 14 for why MeSH does not rescue that. So the clusters and their "
+           "journals are printed, and the reading is yours. It is usually not subtle: clusters in "
+           "oncology, in analytical chemistry, in soil microbiology and in machine learning are not "
+           "one surgeon's decade."),
         "",
-        "If the clusters look like different people, nothing above this line is worth quoting. "
-        "Re-harvest with `--orcid`, which is the only evidence that settles it, and read the "
-        "report again. Warning G3 is raised for a corpus no configured identity evidence actually "
-        "reached — nothing set, or something set that matched nothing, or an OpenAlex id that "
-        "reached too little of it — in bold at the top of this section, and it no longer refuses "
-        "the report; this section exists because evidence that *did* reach the records can still "
-        "be weak, an affiliation keyword or an institutional mail domain shared by a whole "
-        "department raises no warning at all, and such a corpus can still describe several people.",
+        en("If the clusters look like different people, nothing above this line is worth quoting. "
+           "Re-harvest with `--orcid`, which is the only evidence that settles it, and read the "
+           "report again. Warning G3 is raised for a corpus no configured identity evidence actually "
+           "reached — nothing set, or something set that matched nothing, or an OpenAlex id that "
+           "reached too little of it — in bold at the top of this section, and it no longer refuses "
+           "the report; this section exists because evidence that *did* reach the records can still "
+           "be weak, an affiliation keyword or an institutional mail domain shared by a whole "
+           "department raises no warning at all, and such a corpus can still describe several people."),
         "",
-        f"Clusters holding fewer than {CLUSTER_DETAIL_MIN} records are summarised rather than "
-        "listed in full: a page with thirty one-record clusters printed out buries the ones worth "
-        "reading. Their journals are still named.",
+        en("Clusters holding fewer than {cluster_detail_min} records are summarised "
+           "rather than listed in full: a page with thirty one-record clusters "
+           "printed out buries the ones worth reading. Their journals are still named.",
+           cluster_detail_min=CLUSTER_DETAIL_MIN),
     ]
 
 
 def _graduates_prose() -> list[str]:
     """Section 17's fixed text: the caveat, the three populations, the limits, the rules."""
     lines = [
-        "This section is printed second and numbered 17. Both are deliberate. It is printed here "
-        "because it repairs the limit Section 0 states — every count in Sections 1 to 16 is taken "
-        "over people who appear on an indexed paper, so a graduate who published nothing is "
-        "missing from every numerator and every denominator above. It is numbered 17 because it "
-        "was added after those sections and four other modules cross-reference them by number; "
-        "renumbering to put it second would falsify all of those at once.",
+        en("This section is printed second and numbered 17. Both are deliberate. It is printed here "
+           "because it repairs the limit Section 0 states — every count in Sections 1 to 16 is taken "
+           "over people who appear on an indexed paper, so a graduate who published nothing is "
+           "missing from every numerator and every denominator above. It is numbered 17 because it "
+           "was added after those sections and four other modules cross-reference them by number; "
+           "renumbering to put it second would falsify all of those at once."),
         "",
-        THESIS_DENOMINATOR_CAVEAT,
+        en(THESIS_DENOMINATOR_CAVEAT),
         "",
-        "Three nested populations. Read all three rows: a reader who sees only the middle one "
-        "will take it for the whole group, which is the specific misreading this section is most "
-        "likely to cause.",
+        en("Three nested populations. Read all three rows: a reader who sees only the middle one "
+           "will take it for the whole group, which is the specific misreading this section is most "
+           "likely to cause."),
         "",
-        "| population | source | what it is |",
+        en("| population | source | what it is |"),
         "|---|---|---|",
     ]
-    lines += [f"| {name} | {source} | {note} |" for name, source, note in DENOMINATOR_LADDER]
+    lines += [en("| {name} | {source} | {note} |", name=en(name), source=en(source), note=en(note))
+              for name, source, note in DENOMINATOR_LADDER]
     lines += [
         "",
-        "What a thesis export misses, separately from the people who left before finishing. Each "
-        "of these bends a count below in a stated direction:",
+        en("What a thesis export misses, separately from the people who left before finishing. Each "
+           "of these bends a count below in a stated direction:"),
         "",
     ]
-    lines += [f"- **{name}** — {note}" for name, note in ROSTER_LIMITS]
+    lines += _register_lines(ROSTER_LIMITS)
     lines += [
         "",
-        "How each name pairing was treated. Nothing uncertain is pushed into either bucket, which "
-        "is why the count of graduates with no paper is reported as a floor and a ceiling rather "
-        "than as one number:",
+        en("How each name pairing was treated. Nothing uncertain is pushed into either bucket, which "
+           "is why the count of graduates with no paper is reported as a floor and a ceiling rather "
+           "than as one number:"),
         "",
     ]
-    lines += [f"- **{level}** — {treatment}. {why}" for level, treatment, why in MATCH_RULES]
+    lines += [en("- **{level}** — {treatment}. {why}", level=level, treatment=en(treatment), why=en(why))
+              for level, treatment, why in MATCH_RULES]
     return lines
 
 
@@ -3385,52 +3497,58 @@ def _graduates_body(graduates: dict[str, Any] | None, note: str) -> list[str]:
     """Section 17. The real denominator, or the reason there is none."""
     if graduates is None:
         return [
-            "Not computed: no degree-thesis roster was joined to this corpus.",
+            en("Not computed: no degree-thesis roster was joined to this corpus."),
             "",
-            f"Reason: {note or _NO_THESIS_ROSTER_NOTE}",
+            en("Reason: {note}", note=en(note or _NO_THESIS_ROSTER_NOTE)),
             "",
-            "What that costs is the one thing this report cannot work around on its own. PubMed "
-            "holds people who published. Someone who took a degree in this group and never "
-            "appeared on an indexed paper is in none of the counts above — not in a numerator, "
-            "not in a denominator, not in the roster, not in any figure. Nothing in Sections 1 "
-            "to 16 is evidence about how many such people there are, in either direction.",
+            en("What that costs is the one thing this report cannot work around on its own. PubMed "
+               "holds people who published. Someone who took a degree in this group and never "
+               "appeared on an indexed paper is in none of the counts above — not in a numerator, "
+               "not in a denominator, not in the roster, not in any figure. Nothing in Sections 1 "
+               "to 16 is evidence about how many such people there are, in either direction."),
             "",
-            "To supply one: search a degree-thesis library (CNKI, 万方) for this advisor as "
-            "supervisor, export the hit list, and save it as UTF-8 CSV carrying at least the "
-            "columns 导师姓名, 学生姓名, 学位类型, 毕业年, 库来源, 导出日期. Then re-run with "
-            "`--thesis-roster <path.csv>`.",
-            "- 学生姓名拼音 (a romanised name for each graduate) is optional in the schema and "
-            "decisive in practice: without it a roster written in Chinese characters cannot be "
-            "joined to romanised PubMed bylines at all, and every graduate comes back undecided "
-            "rather than matched or unmatched.",
-            "- 库来源 and 导出日期 are required for the same reason the journal table needs an "
-            "edition column: theses reach a library months after the defence, so a count with no "
-            "date on it cannot be compared with a later one.",
+            en("To supply one: search a degree-thesis library (CNKI, 万方) for this advisor as "
+               "supervisor, export the hit list, and save it as UTF-8 CSV carrying at least the "
+               "columns 导师姓名, 学生姓名, 学位类型, 毕业年, 库来源, 导出日期. Then re-run with "
+               "`--thesis-roster <path.csv>`."),
+            en("- 学生姓名拼音 (a romanised name for each graduate) is optional in the schema and "
+               "decisive in practice: without it a roster written in Chinese characters cannot be "
+               "joined to romanised PubMed bylines at all, and every graduate comes back undecided "
+               "rather than matched or unmatched."),
+            en("- 库来源 and 导出日期 are required for the same reason the journal table needs an "
+               "edition column: theses reach a library months after the defence, so a count with no "
+               "date on it cannot be compared with a later one."),
         ]
 
     counts = graduates["counts"]
     floor, ceiling = graduates["without_pubmed_bounds"]
     provenance = graduates["provenance"]
     lines = [
-        f"{counts['graduates_total']} distinct people took a degree under this advisor according "
-        f"to the export. Not thesis rows: someone who took a master's and then a doctorate here "
-        f"is one graduate.",
+        en("{graduates_total} distinct people took a degree under this advisor "
+           "according to the export. Not thesis rows: someone who took a master's and "
+           "then a doctorate here is one graduate.",
+           graduates_total=counts['graduates_total']),
         "",
-        "| population | count | of |",
+        en("| population | count | of |"),
         "|---|---|---|",
-        f"| graduates on record | {counts['graduates_total']} | {counts['graduates_total']} |",
-        f"| ... who also appear in the PubMed corpus | {counts['with_pubmed_record']} | "
-        f"{counts['graduates_total']} |",
-        f"| ... who appear in no PubMed paper in the window | {counts['without_pubmed_record']} | "
-        f"{counts['graduates_total']} |",
-        f"| ... undecided against the PubMed roster | {counts['needs_manual_review']} | "
-        f"{counts['graduates_total']} |",
-        f"| in the PubMed corpus but not on the graduation list | {counts['pubmed_only']} | "
-        f"{counts['pubmed_roster_size']} |",
+        en("| graduates on record | {graduates_total} | {graduates_total} |", graduates_total=counts['graduates_total']),
+        en("| ... who also appear in the PubMed corpus | {with_pubmed_record} | "
+           "{graduates_total} |",
+           with_pubmed_record=counts['with_pubmed_record'], graduates_total=counts['graduates_total']),
+        en("| ... who appear in no PubMed paper in the window | "
+           "{without_pubmed_record} | {graduates_total} |",
+           without_pubmed_record=counts['without_pubmed_record'], graduates_total=counts['graduates_total']),
+        en("| ... undecided against the PubMed roster | {needs_manual_review} | "
+           "{graduates_total} |",
+           needs_manual_review=counts['needs_manual_review'], graduates_total=counts['graduates_total']),
+        en("| in the PubMed corpus but not on the graduation list | {pubmed_only} | "
+           "{pubmed_roster_size} |",
+           pubmed_only=counts['pubmed_only'], pubmed_roster_size=counts['pubmed_roster_size']),
         "",
-        f"- graduates with no PubMed paper, as a floor and a ceiling: {floor} to {ceiling} of "
-        f"{counts['graduates_total']}. Every undecided row could fall either way, so one number "
-        f"here would hide how far apart the two ends are.",
+        en("- graduates with no PubMed paper, as a floor and a ceiling: {floor} to "
+           "{ceiling} of {graduates_total}. Every undecided row could fall either "
+           "way, so one number here would hide how far apart the two ends are.",
+           floor=floor, ceiling=ceiling, graduates_total=counts['graduates_total']),
     ]
 
     # Three cases, and they are not two. `suppressed` covers a refused
@@ -3441,74 +3559,79 @@ def _graduates_body(graduates: dict[str, Any] | None, note: str) -> list[str]:
     # "None%", which is what the first run of this section actually did.
     share = graduates["without_pubmed_share_percent"]
     if graduates["suppressed"]:
-        lines.append("- no share is computed, and the reasons are not rounded off:")
-        lines += [f"  - {reason}" for reason in graduates["suppressed_reasons"]]
+        lines.append(en("- no share is computed, and the reasons are not rounded off:"))
+        lines += [f"  - {en(reason)}" for reason in graduates["suppressed_reasons"]]
     elif share is None:
         lines.append(
-            f"- no share is computed: a percentage needs at least {M.MIN_N_PERCENT} in the "
-            f"denominator and this one is {counts['graduates_total']}. The counts and the names "
-            f"stand on their own, and at this size a name is more checkable than a percentage. "
-            f"{graduates['share_basis']}"
+            en("- no share is computed: a percentage needs at least {min_n_percent} in "
+               "the denominator and this one is {graduates_total}. The counts and the "
+               "names stand on their own, and at this size a name is more checkable than "
+               "a percentage. {share_basis}",
+               min_n_percent=en(M.MIN_N_PERCENT), graduates_total=counts['graduates_total'], share_basis=en(graduates['share_basis']))
         )
     else:
         lines.append(
-            f"- share of graduates on record with no PubMed paper: {share}% of "
-            f"{counts['graduates_total']}. {graduates['share_basis']}"
+            en("- share of graduates on record with no PubMed paper: {share}% of "
+               "{graduates_total}. {share_basis}",
+               share=share, graduates_total=counts['graduates_total'], share_basis=en(graduates['share_basis']))
         )
     lines += [
-        f"- undecided share: {graduates['unresolved_share']:.0%} of graduates, against a declared "
-        f"ceiling of {graduates['max_unresolved_share']:.0%} above which the aggregate is "
-        f"withheld entirely",
-        f"- rows attributed to this PI: {graduates['rows_for_pi']} "
-        f"(attribution: {graduates['advisor_filter']})",
+        en("- undecided share: {unresolved_share:.0%} of graduates, against a "
+           "declared ceiling of {max_unresolved_share:.0%} above which the aggregate "
+           "is withheld entirely",
+           unresolved_share=graduates['unresolved_share'], max_unresolved_share=graduates['max_unresolved_share']),
+        en("- rows attributed to this PI: {rows_for_pi} (attribution: "
+           "{advisor_filter})",
+           rows_for_pi=graduates['rows_for_pi'], advisor_filter=graduates['advisor_filter']),
     ]
     if graduates["advisor_note"]:
-        lines.append(f"- attribution note: {graduates['advisor_note']}")
+        lines.append(en("- attribution note: {advisor_note}", advisor_note=en(graduates['advisor_note'])))
 
     lines += [
         "",
-        "Where the graduate list came from. Without these a count in this section is a number "
-        "with no library and no day attached:",
+        en("Where the graduate list came from. Without these a count in this section is a number "
+           "with no library and no day attached:"),
         "",
-        f"- file: `{provenance.get('path') or 'not recorded'}` (read as "
-        f"{provenance.get('encoding') or 'unknown encoding'})",
-        f"- libraries: {_fmt_input(provenance.get('source_dbs')) or 'not recorded'}",
-        f"- export dates: {_fmt_input(provenance.get('export_dates')) or 'not recorded'}",
-        f"- awarding institutions: {_fmt_input(provenance.get('institutions')) or 'not recorded'}",
-        f"- rows read {provenance.get('rows_read', '?')}; rejected {provenance.get('rejected', 0)}; "
-        f"exact duplicates dropped {provenance.get('duplicates_dropped', 0)}",
+        en("- file: `{path}` (read as {encoding})", path=provenance.get('path') or en('not recorded'), encoding=provenance.get('encoding') or en('unknown encoding')),
+        en("- libraries: {source_dbs}", source_dbs=_fmt_input(provenance.get('source_dbs')) or en('not recorded')),
+        en("- export dates: {export_dates}", export_dates=_fmt_input(provenance.get('export_dates')) or en('not recorded')),
+        en("- awarding institutions: {institutions}", institutions=_fmt_input(provenance.get('institutions')) or en('not recorded')),
+        en("- rows read {rows_read}; rejected {rejected}; exact duplicates dropped "
+           "{duplicates_dropped}",
+           rows_read=provenance.get('rows_read', '?'), rejected=provenance.get('rejected', 0), duplicates_dropped=provenance.get('duplicates_dropped', 0)),
     ]
 
-    lines += ["", "**Graduates on record with no PubMed paper in this window.** Named, because at "
-              "these counts a name is checkable and a number is not:", ""]
+    lines += ["", en("**Graduates on record with no PubMed paper in this window.** Named, because at "
+                 "these counts a name is checkable and a number is not:"), ""]
     if graduates["without_pubmed_record"]:
         lines += [
             f"- {row['student']}"
             + (f" ({row['student_latin']})" if row["student_latin"] else "")
-            + f" — {', '.join(d for d in row['degrees'] if d) or 'degree not recognised'}, "
+            + f" — {', '.join(en(d) for d in row['degrees'] if d) or en('degree not recognised')}, "
             f"{row['graduation_year']}"
             for row in graduates["without_pubmed_record"]
         ]
     else:
-        lines.append("- none")
+        lines.append(en("- none"))
 
-    lines += ["", "**Undecided, for a human to settle.** These are neither counted as published "
-              "nor counted as unpublished:", ""]
+    lines += ["", en("**Undecided, for a human to settle.** These are neither counted as published "
+                 "nor counted as unpublished:"), ""]
     if graduates["needs_manual_review"]:
         lines += [
-            f"- {row['student']} ({row['graduation_year']}) — {row['reason']}; candidates: "
-            f"{', '.join(row.get('candidates') or []) or 'none'}"
+            en("- {student} ({graduation_year}) — {reason}; candidates: {candidates}", student=row['student'], graduation_year=row['graduation_year'], reason=en(row['reason']), candidates=', '.join(row.get('candidates') or []) or en('none'))
             for row in graduates["needs_manual_review"]
         ]
     else:
-        lines.append("- none")
+        lines.append(en("- none"))
 
     lines += [
         "",
-        f"**In the PubMed corpus and not on the graduation list: {counts['pubmed_only']} of "
-        f"{counts['pubmed_roster_size']}.** This is not a list of outsiders and must not be read "
-        "as one — postdocs, technicians, research assistants, visiting trainees, clinical fellows "
-        "and undergraduates never deposit a thesis and land here as a matter of course.",
+        en("**In the PubMed corpus and not on the graduation list: {pubmed_only} of "
+           "{pubmed_roster_size}.** This is not a list of outsiders and must not be "
+           "read as one — postdocs, technicians, research assistants, visiting "
+           "trainees, clinical fellows and undergraduates never deposit a thesis and "
+           "land here as a matter of course.",
+           pubmed_only=counts['pubmed_only'], pubmed_roster_size=counts['pubmed_roster_size']),
     ]
     return lines
 
@@ -3516,26 +3639,26 @@ def _graduates_body(graduates: dict[str, Any] | None, note: str) -> list[str]:
 def _journal_prose() -> list[str]:
     """Section 18's fixed text: where the numbers come from and what they cannot mean."""
     lines = [
-        "Nothing in this section was fetched. Impact factor, JCR quartile and CAS partition live "
-        "in subscription databases that forbid scraping and defend against it, so this package "
-        "ships no crawler and makes no request for any of them. It defines the table's columns, "
-        "says which journals this corpus actually uses, joins the file you filled in, and prints "
-        "the edition and retrieval date beside every number it prints.",
+        en("Nothing in this section was fetched. Impact factor, JCR quartile and CAS partition live "
+           "in subscription databases that forbid scraping and defend against it, so this package "
+           "ships no crawler and makes no request for any of them. It defines the table's columns, "
+           "says which journals this corpus actually uses, joins the file you filled in, and prints "
+           "the edition and retrieval date beside every number it prints."),
         "",
-        "The scope is set by the corpus, not by the vendor. There are tens of thousands of "
-        "indexed journals and one five-year corpus uses a couple of dozen; "
-        "`check-your-advisor journal-worklist` writes exactly those, with their ISSNs and the "
-        "number of papers each holds, in the table's own format. Fill the metric columns in and "
-        "it loads straight back. Journals looked up once stay in the file and are reused by the "
-        "next corpus.",
+        en("The scope is set by the corpus, not by the vendor. There are tens of thousands of "
+           "indexed journals and one five-year corpus uses a couple of dozen; "
+           "`check-your-advisor journal-worklist` writes exactly those, with their ISSNs and the "
+           "number of papers each holds, in the table's own format. Fill the metric columns in and "
+           "it loads straight back. Journals looked up once stay in the file and are reused by the "
+           "next corpus."),
         "",
-        "The edition column is not bureaucracy. The sources disagree, and which one a number "
-        "came from decides what it means: " + " / ".join(EDITIONS) + ". A partition with no "
-        "edition beside it cannot be checked by anyone later, including the person who wrote it "
-        "down.",
+        en("The edition column is not bureaucracy. The sources disagree, and which one a number "
+           "came from decides what it means: {editions}. A partition with no edition beside it "
+           "cannot be checked by anyone later, including the person who wrote it down.",
+           editions=" / ".join(EDITIONS)),
         "",
     ]
-    lines += [f"- **{key}** — {text}" for key, text in JOURNAL_CAVEATS.items()]
+    lines += _keyed_lines(JOURNAL_CAVEATS)
     return lines
 
 
@@ -3559,14 +3682,14 @@ def _risk_cells(risk: dict[str, Any] | None) -> dict[str, str]:
     for row in risk.get("rows") or []:
         name = str(row.get("journal") or "")
         if not row.get("issn"):
-            cells[name] = "无 ISSN，查不了"
+            cells[name] = zh("无 ISSN，查不了")
         elif not row.get("checked"):
-            cells[name] = "本次未采集"
+            cells[name] = zh("本次未采集")
         elif not row.get("sources_answered"):
-            cells[name] = "三源均未应答"
+            cells[name] = zh("三源均未应答")
         else:
             count = len(row.get("signal_names") or [])
-            cells[name] = f"{count} 项（见下）" if count else "0 项"
+            cells[name] = zh("{count} 项（见下）", count=count) if count else zh("0 项")
     return cells
 
 
@@ -3574,73 +3697,70 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
                   risk: dict[str, Any] | None = None) -> list[str]:
     """Section 18. The joined journal metrics, or a stated absence — never a blank cell."""
     if journals is None:
-        return ["Not computed: no journal join was supplied to the renderer."]
+        return [en("Not computed: no journal join was supplied to the renderer.")]
 
     if journals["table_missing"]:
         return [
-            "未提供对照表 — no journal metric table was joined to this corpus, so every "
-            "journal-level column in this report is empty for a stated reason rather than "
-            "because the journals have no metrics.",
+            en("{marker} — no journal metric table was joined to this corpus, so every "
+               "journal-level column in this report is empty for a stated reason rather than "
+               "because the journals have no metrics.",
+               marker=zh(NO_TABLE_MARKER)),
             "",
-            f"Reason: {note or _NO_JOURNAL_TABLE_NOTE}",
+            en("Reason: {note}", note=en(note or _NO_JOURNAL_TABLE_NOTE)),
             "",
-            f"- distinct journal strings in this corpus: {journals['journal_denominator']}",
-            f"- records carrying a journal string: {journals['papers_with_journal']} of "
-            f"{journals['denominator']}",
-            f"- records carrying none: {journals['papers_without_journal']} of "
-            f"{journals['denominator']}",
+            en("- distinct journal strings in this corpus: {journal_denominator}", journal_denominator=journals['journal_denominator']),
+            en("- records carrying a journal string: {papers_with_journal} of "
+               "{denominator}",
+               papers_with_journal=journals['papers_with_journal'], denominator=journals['denominator']),
+            en("- records carrying none: {papers_without_journal} of {denominator}", papers_without_journal=journals['papers_without_journal'], denominator=journals['denominator']),
             "",
-            "That first number is the whole size of the job: nobody is looking up twenty thousand "
-            "journals, and nobody has to. Run `check-your-advisor journal-worklist --output-dir "
-            "<corpus dir>` to write those journals, their ISSNs and their paper counts into a CSV "
-            "in this table's own format, look them up on LetPub or ablesci, fill in the metric "
-            "columns, and re-run with `--journal-table <path.csv>`.",
-            "- An empty cell here is a lookup nobody has done yet. It is not a low impact factor, "
-            "not an absent partition and not a statement about any journal.",
-            "- LetPub's search-results list shows the 民间版 partition by default. If you copy "
-            "from that page, write 民间版 in 版本来源 — do not file it as the official number.",
+            en("That first number is the whole size of the job: nobody is looking up twenty thousand "
+               "journals, and nobody has to. Run `check-your-advisor journal-worklist --output-dir "
+               "<corpus dir>` to write those journals, their ISSNs and their paper counts into a CSV "
+               "in this table's own format, look them up on LetPub or ablesci, fill in the metric "
+               "columns, and re-run with `--journal-table <path.csv>`."),
+            en("- An empty cell here is a lookup nobody has done yet. It is not a low impact factor, "
+               "not an absent partition and not a statement about any journal."),
+            en("- LetPub's search-results list shows the 民间版 partition by default. If you copy "
+               "from that page, write 民间版 in 版本来源 — do not file it as the official number."),
         ]
 
     provenance = journals["provenance"]
     match_counts = journals["match_counts"]
     lines = [
-        f"Journal metrics joined from a table you supplied. Coverage is reported against both "
-        f"denominators, because a table can cover most papers while missing most journals and the "
-        f"two facts point at different work.",
+        en("Journal metrics joined from a table you supplied. Coverage is reported "
+           "against both denominators, because a table can cover most papers while "
+           "missing most journals and the two facts point at different work."),
         "",
-        f"- records matched to the table: {journals['matched_papers']} of "
-        f"{journals['papers_with_journal']} carrying a journal string "
-        f"({journals['denominator']} records in the corpus)",
-        f"- distinct journals matched: {journals['matched_journals']} of "
-        f"{journals['journal_denominator']}",
-        f"- by route: ISSN {match_counts.get(MATCH_ISSN, 0)}, exact name "
-        f"{match_counts.get(MATCH_EXACT, 0)}, official abbreviation "
-        f"{match_counts.get(MATCH_ABBREV_OFFICIAL, 0)}, abbreviation guess "
-        f"{match_counts.get(MATCH_ABBREV, 0)} "
-        f"— the first three are facts about what the journal is called, the last is an inference "
-        f"from how a name is spelled, so they are listed apart and never added together into one "
-        f"coverage figure. The official abbreviation is NLM's own, carried on the record; it "
-        f"matters because a table typed from a source page holds the abbreviation about as often "
-        f"as the full title, and the corpus holds the other one",
+        en("- records matched to the table: {matched_papers} of {papers_with_journal} "
+           "carrying a journal string ({denominator} records in the corpus)",
+           matched_papers=journals['matched_papers'], papers_with_journal=journals['papers_with_journal'], denominator=journals['denominator']),
+        en("- distinct journals matched: {matched_journals} of {journal_denominator}", matched_journals=journals['matched_journals'], journal_denominator=journals['journal_denominator']),
+        en("- by route: ISSN {get}, exact name {get_2}, official abbreviation "
+           "{get_3}, abbreviation guess {get_4} — the first three are facts about "
+           "what the journal is called, the last is an inference from how a name is "
+           "spelled, so they are listed apart and never added together into one "
+           "coverage figure. The official abbreviation is NLM's own, carried on the "
+           "record; it matters because a table typed from a source page holds the "
+           "abbreviation about as often as the full title, and the corpus holds the "
+           "other one",
+           get=match_counts.get(MATCH_ISSN, 0), get_2=match_counts.get(MATCH_EXACT, 0), get_3=match_counts.get(MATCH_ABBREV_OFFICIAL, 0), get_4=match_counts.get(MATCH_ABBREV, 0)),
         "",
-        "Where the table came from. This is the part that is unfalsifiable two years from now if "
-        "it is not written down:",
+        en("Where the table came from. This is the part that is unfalsifiable two years from now if "
+           "it is not written down:"),
         "",
-        f"- file: `{provenance.get('table_path') or 'not recorded'}` (read as "
-        f"{provenance.get('encoding') or 'unknown encoding'})",
-        f"- rows {provenance.get('table_rows', 0)} covering {provenance.get('table_journals', 0)} "
-        f"journals",
-        f"- 版本来源 present in the file: {_fmt_input(provenance.get('editions')) or 'none'}",
-        f"- rows with no edition recorded: {provenance.get('rows_without_edition', 0)}",
-        f"- IF 年份 present: {_fmt_input(provenance.get('if_years')) or 'none'}",
-        f"- 数据获取日期 span: "
-        f"{' to '.join(provenance.get('retrieved_on_range') or []) or 'not recorded'}",
+        en("- file: `{table_path}` (read as {encoding})", table_path=provenance.get('table_path') or en('not recorded'), encoding=provenance.get('encoding') or en('unknown encoding')),
+        en("- rows {table_rows} covering {table_journals} journals", table_rows=provenance.get('table_rows', 0), table_journals=provenance.get('table_journals', 0)),
+        en("- 版本来源 present in the file: {editions}", editions=_fmt_input(provenance.get('editions')) or en('none')),
+        en("- rows with no edition recorded: {rows_without_edition}", rows_without_edition=provenance.get('rows_without_edition', 0)),
+        en("- IF 年份 present: {if_years}", if_years=_fmt_input(provenance.get('if_years')) or en('none')),
+        en("- 数据获取日期 span: {retrieved_on_range}", retrieved_on_range=en(' to ').join(provenance.get('retrieved_on_range') or []) or en('not recorded')),
         "",
-        "One row per journal per edition. Where a journal was checked against two editions both "
-        "rows are here and neither wins:",
+        en("One row per journal per edition. Where a journal was checked against two editions both "
+           "rows are here and neither wins:"),
         "",
-        "| journal (as PubMed records it) | papers | match | 版本来源 | 数据获取日期 | 影响因子 "
-        "(年份) | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |",
+        en("| journal (as PubMed records it) | papers | match | 版本来源 | 数据获取日期 | 影响因子 "
+           "(年份) | JCR | 中科院大类 | 中科院小类 | 预警 | 风险信号 |"),
         "|---|---|---|---|---|---|---|---|---|---|---|",
     ]
     # 预警 and 风险信号 are two columns and never one. The first is the CAS
@@ -3650,7 +3770,7 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
     # anybody publishes. Merging them would put a hand-copied Chinese list and a
     # DOAJ membership flag in one cell as though they were the same kind of claim.
     cells = _risk_cells(risk)
-    default_cell = "未采集" if (not risk or risk.get("risk_missing")) else "-"
+    default_cell = zh(NOT_COLLECTED_MARKER) if (not risk or risk.get("risk_missing")) else "-"
     for result in journals["journals"]:
         risk_cell = cells.get(result["journal"], default_cell)
         if not result["entries"]:
@@ -3660,11 +3780,11 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
             # is next, so they are never spelled the same way.
             lines.append(
                 f"| {result['journal']} | {result['paper_count']} | {result['match_type']} | "
-                f"本表未收录 | - | - | - | - | - | - | {risk_cell} |"
+                f"{zh('本表未收录')} | - | - | - | - | - | - | {risk_cell} |"
             )
             continue
         for row in result["entries"]:
-            warning = "是" if row["is_warning"] else ("否" if row["is_warning"] is False else "未标注")
+            warning = zh("是") if row["is_warning"] else (zh("否") if row["is_warning"] is False else zh("未标注"))
             if row["warning_level"]:
                 warning += f" ({row['warning_level']})"
             impact = row["impact_factor_raw"] or "-"
@@ -3672,7 +3792,7 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
                 impact += f" ({row['if_year']})"
             lines.append(
                 f"| {result['journal']} | {result['paper_count']} | {result['match_type']} | "
-                f"{row['source_edition']} | {row['retrieved_on'] or '未记录'} | {impact} | "
+                f"{row['source_edition']} | {row['retrieved_on'] or zh('未记录')} | {impact} | "
                 f"{row['jcr_quartile'] or '-'} | {row['cas_major'] or '-'} | "
                 f"{row['cas_minor'] or '-'} | {warning} | {risk_cell} |"
             )
@@ -3681,46 +3801,48 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
         # happens when no record in the corpus carries a journal string at all,
         # which is a fact about the corpus and is worth one row saying so.
         lines.append(
-            f"| (no record in this corpus carries a journal string) | "
-            f"{journals['papers_without_journal']} | - | - | - | - | - | - | - | - | - |"
+            en("| (no record in this corpus carries a journal string) | "
+               "{papers_without_journal} | - | - | - | - | - | - | - | - | - |",
+               papers_without_journal=journals['papers_without_journal'])
         )
 
     lines += [
         "",
-        f"- journals in this corpus that the table does not contain: "
-        f"{len(journals['unmatched_journals'])} — "
-        f"{', '.join(journals['unmatched_journals']) or 'none'}",
-        f"- journal names whose abbreviation fits more than one table entry, left unmatched "
-        f"rather than resolved: {len(journals['ambiguous_journals'])} — "
-        + (", ".join(
-            f"{item['journal']} (could be {', '.join(item['candidates'])})"
-            for item in journals["ambiguous_journals"]
-        ) or "none"),
+        en("- journals in this corpus that the table does not contain: "
+           "{n_unmatched_journals} — {unmatched_journals}",
+           n_unmatched_journals=len(journals['unmatched_journals']), unmatched_journals=', '.join(journals['unmatched_journals']) or en('none')),
+        en("- journal names whose abbreviation fits more than one table entry, left "
+           "unmatched rather than resolved: {n_ambiguous_journals} — {items}",
+           n_ambiguous_journals=len(journals['ambiguous_journals']),
+           items=", ".join(
+               en("{journal} (could be {candidates})", journal=item['journal'],
+                  candidates=", ".join(item['candidates']))
+               for item in journals["ambiguous_journals"]
+           ) or en("none")),
     ]
 
-    lines += ["", f"**Editions that disagree: {journals['disagreement_count']}.** Shown, not "
-              "resolved — this package has no basis for preferring one edition over another:", ""]
+    lines += ["", en("**Editions that disagree: {disagreement_count}.** Shown, not resolved — "
+                     "this package has no basis for preferring one edition over another:",
+                     disagreement_count=journals['disagreement_count']), ""]
     if journals["disagreeing_journals"]:
         lines += [
             f"- {item['journal']} ({', '.join(item['editions'])}): "
-            + "; ".join(f"{field} = {' vs '.join(str(v) for v in values)}"
+            + "; ".join(f"{field} = {en(' vs ').join(str(v) for v in values)}"
                         for field, values in item["fields"].items())
             for item in journals["disagreeing_journals"]
         ]
     else:
-        lines.append("- none")
+        lines.append(en("- none"))
 
-    lines += ["", "**On a 预警 (warning) list, per the table as filled in:**", ""]
+    lines += ["", en("**On a 预警 (warning) list, per the table as filled in:**"), ""]
     if journals["warned_journals"]:
         lines += [
-            f"- {item['journal']} — {item['paper_count']} record(s); level "
-            f"{', '.join(item['levels']) or 'not recorded'}; edition "
-            f"{', '.join(item['editions'])}"
+            en("- {journal} — {paper_count} record(s); level {levels}; edition {editions}", journal=item['journal'], paper_count=item['paper_count'], levels=', '.join(item['levels']) or en('not recorded'), editions=', '.join(item['editions']))
             for item in journals["warned_journals"]
         ]
     else:
-        lines.append("- none in this table; note that a blank 是否预警 cell is not a clean bill of "
-                     "health, it is a cell nobody filled in")
+        lines.append(en("- none in this table; note that a blank 是否预警 cell is not a clean bill of "
+                        "health, it is a cell nobody filled in"))
     return lines
 
 
@@ -3728,100 +3850,106 @@ def _risk_prose() -> list[str]:
     """Section 18's second block of fixed text: what a risk signal is, and is not."""
     lines = [
         "",
-        "**Public risk signals, and the word this block will not use.** The columns above come "
-        "from a file you filled in. This block comes from three open keyless APIs — DOAJ, Crossref "
-        "and OpenAlex — read on a stated day and printed with the endpoint that said each thing. "
-        "Every line is a statement of what an endpoint returned. None of them says a journal is "
-        "predatory, and neither does this toolkit: that is an accusation about a publisher's "
-        "conduct, none of these three sources makes it, and no count of these signals is turned "
-        "into a grade, a tier, a score, a letter or a colour here at any number of them. Nothing "
-        "in this block reaches the composite score in Section 16.",
+        en("**Public risk signals, and the word this block will not use.** The columns above come "
+           "from a file you filled in. This block comes from three open keyless APIs — DOAJ, Crossref "
+           "and OpenAlex — read on a stated day and printed with the endpoint that said each thing. "
+           "Every line is a statement of what an endpoint returned. None of them says a journal is "
+           "predatory, and neither does this toolkit: that is an accusation about a publisher's "
+           "conduct, none of these three sources makes it, and no count of these signals is turned "
+           "into a grade, a tier, a score, a letter or a colour here at any number of them. Nothing "
+           "in this block reaches the composite score in Section 16."),
         "",
-        "All three sources are queried and none of them wins. That is deliberate and it is the "
-        "same rule JRN-07 applies to two editions of a partition table: they answer different "
-        "questions, they disagree routinely — OpenAlex keeps its own copy of the DOAJ membership "
-        "flag and it can lag DOAJ's live answer — and where two of them say different things both "
-        "lines are printed with their dates and neither is preferred.",
+        en("All three sources are queried and none of them wins. That is deliberate and it is the "
+           "same rule JRN-07 applies to two editions of a partition table: they answer different "
+           "questions, they disagree routinely — OpenAlex keeps its own copy of the DOAJ membership "
+           "flag and it can lag DOAJ's live answer — and where two of them say different things both "
+           "lines are printed with their dates and neither is preferred."),
         "",
-        "The 中科院国际期刊预警名单 is not in this block and cannot be. It is published once a "
-        "year as a login-walled page and a PDF with no JSON and no CSV endpoint, so it stays where "
-        "it already is: the hand-filled 是否预警 and 预警等级 columns in the table above, which a "
-        "person copies once a year. This package has no crawler for it and will not grow one.",
+        en("The 中科院国际期刊预警名单 is not in this block and cannot be. It is published once a "
+           "year as a login-walled page and a PDF with no JSON and no CSV endpoint, so it stays where "
+           "it already is: the hand-filled 是否预警 and 预警等级 columns in the table above, which a "
+           "person copies once a year. This package has no crawler for it and will not grow one."),
         "",
     ]
-    lines += [f"- **{key}** — {text}" for key, text in JOURNAL_RISK_CAVEATS.items()]
+    lines += _keyed_lines(JOURNAL_RISK_CAVEATS)
     return lines
 
 
 def _risk_body(risk: dict[str, Any] | None, note: str) -> list[str]:
     """Section 18's risk block: the collected signals, or a stated absence."""
     if risk is None:
-        return ["", "Not computed: no journal risk join was supplied to the renderer."]
+        return ["", en("Not computed: no journal risk join was supplied to the renderer.")]
 
     if risk["risk_missing"]:
         return [
             "",
-            "**Public risk signals: 未采集** — no risk signals were collected for this corpus, so "
-            "the 风险信号 column above is empty for a stated reason rather than because the "
-            "journals produced no signal.",
+            en("**Public risk signals: {marker}** — no risk signals were collected for this corpus, so "
+               "the 风险信号 column above is empty for a stated reason rather than because the "
+               "journals produced no signal.",
+               marker=zh(NOT_COLLECTED_MARKER)),
             "",
-            f"Reason: {note or _NO_JOURNAL_RISK_NOTE}",
+            en("Reason: {note}", note=en(note or _NO_JOURNAL_RISK_NOTE)),
             "",
-            f"- distinct journals in this corpus that could be checked: "
-            f"{risk['journal_denominator'] - len(risk['journals_without_issn'])} of "
-            f"{risk['journal_denominator']}",
-            f"- journals the corpus recorded with no usable ISSN, which the three endpoints "
-            f"cannot be asked about at all: {len(risk['journals_without_issn'])} of "
-            f"{risk['journal_denominator']} — "
-            f"{', '.join(risk['journals_without_issn']) or 'none'}",
+            en("- distinct journals in this corpus that could be checked: {value} of "
+               "{journal_denominator}",
+               value=risk['journal_denominator'] - len(risk['journals_without_issn']), journal_denominator=risk['journal_denominator']),
+            en("- journals the corpus recorded with no usable ISSN, which the three "
+               "endpoints cannot be asked about at all: {n_journals_without_issn} of "
+               "{journal_denominator} — {journals_without_issn}",
+               n_journals_without_issn=len(risk['journals_without_issn']), journal_denominator=risk['journal_denominator'], journals_without_issn=', '.join(risk['journals_without_issn']) or en('none')),
             "",
-            "Run `check-your-advisor journal-risk --output-dir <corpus dir>` to collect them. It "
-            "makes one GET per journal against " + " + ".join(SOURCE_ORDER) + ", needs no key and "
-            "no account, writes its own dated file and touches neither the corpus nor the journal "
-            "table you filled in.",
-            "- An empty cell there is a lookup nobody has run yet. It is not a clean bill of "
-            "health and it is not a statement about any journal.",
+            en("Run `check-your-advisor journal-risk --output-dir <corpus dir>` to collect them. It "
+               "makes one GET per journal against {sources}, needs no key and no account, writes "
+               "its own dated file and touches neither the corpus nor the journal table you filled "
+               "in.",
+               sources=" + ".join(SOURCE_ORDER)),
+            en("- An empty cell there is a lookup nobody has run yet. It is not a clean bill of "
+               "health and it is not a statement about any journal."),
         ]
 
     provenance = risk["provenance"]
     span = provenance.get("fetched_at_range")
     lines = [
         "",
-        "**Public risk signals, one line per statement.** Collected from three open APIs; each "
-        "line names the endpoint it came from and the day it was read.",
+        en("**Public risk signals, one line per statement.** Collected from three open APIs; each "
+           "line names the endpoint it came from and the day it was read."),
         "",
-        f"- journals matched to a collected record, by ISSN only: {risk['journals_checked']} of "
-        f"{risk['journal_denominator']} — there is deliberately no name fallback here, because a "
-        f"fuzzy name match would attach a real-looking statement about one journal to another",
-        f"- journals with no collected record: {risk['journals_unchecked']} of "
-        f"{risk['journal_denominator']}",
-        f"- journals the corpus recorded with no usable ISSN, which none of the three endpoints "
-        f"can be asked about: {len(risk['journals_without_issn'])} of "
-        f"{risk['journal_denominator']} — "
-        f"{', '.join(risk['journals_without_issn']) or 'none'}",
-        f"- sources queried, all of them, every time: {', '.join(provenance.get('sources') or [])}",
-        f"- Crossref metadata fields counted, a fixed list so the denominator does not move: "
-        f"{len(provenance.get('tracked_coverage_fields') or [])} — "
-        f"{', '.join(provenance.get('tracked_coverage_fields') or []) or 'none'}",
-        f"- signals were read: {' to '.join(span) if span else 'not recorded'}",
-        f"- collected file written: {provenance.get('generated_at') or 'not recorded'}",
+        en("- journals matched to a collected record, by ISSN only: "
+           "{journals_checked} of {journal_denominator} — there is deliberately no "
+           "name fallback here, because a fuzzy name match would attach a "
+           "real-looking statement about one journal to another",
+           journals_checked=risk['journals_checked'], journal_denominator=risk['journal_denominator']),
+        en("- journals with no collected record: {journals_unchecked} of "
+           "{journal_denominator}",
+           journals_unchecked=risk['journals_unchecked'], journal_denominator=risk['journal_denominator']),
+        en("- journals the corpus recorded with no usable ISSN, which none of the "
+           "three endpoints can be asked about: {n_journals_without_issn} of "
+           "{journal_denominator} — {journals_without_issn}",
+           n_journals_without_issn=len(risk['journals_without_issn']), journal_denominator=risk['journal_denominator'], journals_without_issn=', '.join(risk['journals_without_issn']) or en('none')),
+        en("- sources queried, all of them, every time: {sources}", sources=', '.join(provenance.get('sources') or [])),
+        en("- Crossref metadata fields counted, a fixed list so the denominator does "
+           "not move: {n_tracked_coverage_fields} — {tracked_coverage_fields}",
+           n_tracked_coverage_fields=len(provenance.get('tracked_coverage_fields') or []), tracked_coverage_fields=', '.join(provenance.get('tracked_coverage_fields') or []) or en('none')),
+        en("- signals were read: {span}", span=en(' to ').join(span) if span else en('not recorded')),
+        en("- collected file written: {generated_at}", generated_at=provenance.get('generated_at') or en('not recorded')),
         "",
     ]
 
     if risk["signal_counts"]:
         lines += [
-            "How many journals carried each signal. Counts against "
-            f"{risk['journal_denominator']} distinct journals, never a share — a corpus uses a "
-            "couple of dozen journals, far below the sample size at which this report will print "
-            "a percentage at all:",
+            en("How many journals carried each signal. Counts against "
+               "{journal_denominator} distinct journals, never a share — a corpus uses a "
+               "couple of dozen journals, far below the sample size at which this report "
+               "will print a percentage at all:",
+               journal_denominator=risk['journal_denominator']),
             "",
         ]
-        lines += [f"- {name}: {count} of {risk['journal_denominator']}"
+        lines += [en("- {name}: {count} of {journal_denominator}", name=name, count=count, journal_denominator=risk['journal_denominator'])
                   for name, count in risk["signal_counts"].items()]
         lines.append("")
 
     lines += [
-        "| journal | papers | ISSN | signal | 判据来源 | 采集日期 | statement |",
+        en("| journal | papers | ISSN | signal | source | read on | statement |"),
         "|---|---|---|---|---|---|---|",
     ]
     printed = 0
@@ -3833,27 +3961,28 @@ def _risk_body(risk: dict[str, Any] | None, note: str) -> list[str]:
             lines.append(
                 f"| {_table_cell(row['journal'])} | {row['paper_count']} | "
                 f"{row['issn'] or '-'} | {_table_cell(signal.get('signal'))} | "
-                f"{_table_cell(signal.get('source'))} | {row['fetched_at'] or '未记录'} | "
-                f"{_table_cell(signal.get('statement'))} |"
+                f"{_table_cell(signal.get('source'))} | {row['fetched_at'] or zh('未记录')} | "
+                f"{_table_cell(describe_signal(signal))} |"
             )
     if not printed:
         # A header with no rows reads as a rendering failure. Which of the two
         # empty states this is has already been said above; the row says it again
         # where the reader is looking.
         lines.append(
-            f"| (no journal in this corpus carried a signal) | - | - | - | - | - | "
-            f"{risk['journals_checked']} of {risk['journal_denominator']} journals were checked "
-            f"and none produced a statement. That is a fact about the lookup, not a clean bill of "
-            f"health for the journals. |"
+            en("| (no journal in this corpus carried a signal) | - | - | - | - | - | "
+               "{journals_checked} of {journal_denominator} journals were checked and "
+               "none produced a statement. That is a fact about the lookup, not a clean "
+               "bill of health for the journals. |",
+               journals_checked=risk['journals_checked'], journal_denominator=risk['journal_denominator'])
         )
     lines += [
         "",
-        "- 未被 DOAJ 收录 is not a finding. DOAJ indexes open-access journals that applied to it, "
-        "so a subscription journal is absent by construction.",
-        "- A Crossref field at zero is not a finding either. It says what a publisher deposits: "
-        "Journal of Hepatology deposits no abstracts for its backfile.",
-        "- A blank 是否预警 cell in the table above still means nobody checked the CAS list. "
-        "Nothing in this block fills it in, and no signal here is a substitute for it.",
+        en("- 未被 DOAJ 收录 is not a finding. DOAJ indexes open-access journals that applied to it, "
+           "so a subscription journal is absent by construction."),
+        en("- A Crossref field at zero is not a finding either. It says what a publisher deposits: "
+           "Journal of Hepatology deposits no abstracts for its backfile."),
+        en("- A blank 是否预警 cell in the table above still means nobody checked the CAS list. "
+           "Nothing in this block fills it in, and no signal here is a substitute for it."),
     ]
     return lines
 
@@ -3873,28 +4002,28 @@ def _table_cell(text: Any) -> str:
 def _evaluations_prose() -> list[str]:
     """Section 20's fixed text: what this is, what it refuses to do, and who collected it."""
     lines = [
-        "This section is printed last and numbered 20. Last because it is the only section on the "
-        "page that is not a measurement: everything above is computed from publication records "
-        "that anyone can re-fetch and re-check, and this is a list of statements other people "
-        "made. Numbered 20 because four other modules cross-reference the sections above by "
-        "number, and renumbering to put it here would falsify all of them at once.",
+        en("This section is printed last and numbered 20. Last because it is the only section on the "
+           "page that is not a measurement: everything above is computed from publication records "
+           "that anyone can re-fetch and re-check, and this is a list of statements other people "
+           "made. Numbered 20 because four other modules cross-reference the sections above by "
+           "number, and renumbering to put it here would falsify all of them at once."),
         "",
-        EVALUATION_STANCE,
+        en(EVALUATION_STANCE),
         "",
-        "**Nothing here was fetched.** This package contains no crawler, makes no request to any "
-        "forum, review site or Q&A page, and could not have collected this material even if it "
-        "wanted to — those sites do not permit automated collection and several of them defend "
-        "against it. The reader searched, read and typed in every row. What the toolkit does is "
-        "define the columns, refuse a file that cannot say where a statement came from or when it "
-        "was read, attribute the rows to one advisor, and print them with their source attached.",
+        en("**Nothing here was fetched.** This package contains no crawler, makes no request to any "
+           "forum, review site or Q&A page, and could not have collected this material even if it "
+           "wanted to — those sites do not permit automated collection and several of them defend "
+           "against it. The reader searched, read and typed in every row. What the toolkit does is "
+           "define the columns, refuse a file that cannot say where a statement came from or when it "
+           "was read, attribute the rows to one advisor, and print them with their source attached."),
         "",
-        "What a hand-collected set of statements cannot tell you, separately from whether any one "
-        "of them is accurate. Each of these bends the counts below in a stated direction:",
+        en("What a hand-collected set of statements cannot tell you, separately from whether any one "
+           "of them is accurate. Each of these bends the counts below in a stated direction:"),
         "",
     ]
-    lines += [f"- **{name}** — {note}" for name, note in EVALUATION_LIMITS]
-    lines += ["", "What these rows cannot mean:", ""]
-    lines += [f"- **{key}** — {text}" for key, text in EVALUATION_CAVEATS.items()]
+    lines += _register_lines(EVALUATION_LIMITS)
+    lines += ["", en("What these rows cannot mean:"), ""]
+    lines += _keyed_lines(EVALUATION_CAVEATS)
     return lines
 
 
@@ -3902,94 +4031,100 @@ def _evaluations_body(evaluations: dict[str, Any] | None, note: str) -> list[str
     """Section 20. The collected statements with their sources, or a stated absence."""
     if evaluations is None:
         return [
-            "Not computed: no evaluation table was joined to this report.",
+            en("Not computed: no evaluation table was joined to this report."),
             "",
-            f"Reason: {note or _NO_EVALUATION_TABLE_NOTE}",
+            en("Reason: {note}", note=en(note or _NO_EVALUATION_TABLE_NOTE)),
             "",
-            "What that costs is bounded, and worth stating so the absence is not read as either "
-            "an endorsement or an accusation. No statement about this advisor was collected, so "
-            "none is printed. That is not evidence that none exists, and it is not evidence that "
-            "any that exist are favourable or unfavourable. Nothing in Sections 1 to 19 is "
-            "evidence about it either, in any direction: those sections are computed from "
-            "publication records, which carry no account of what supervision was like.",
+            en("What that costs is bounded, and worth stating so the absence is not read as either "
+               "an endorsement or an accusation. No statement about this advisor was collected, so "
+               "none is printed. That is not evidence that none exists, and it is not evidence that "
+               "any that exist are favourable or unfavourable. Nothing in Sections 1 to 19 is "
+               "evidence about it either, in any direction: those sections are computed from "
+               "publication records, which carry no account of what supervision was like."),
             "",
-            "To supply one: search wherever such statements are kept for this advisor, read the "
-            "pages yourself, and record what you find as UTF-8 CSV carrying at least the columns "
-            "导师姓名, 评价来源, 数据获取日期 and one of 评价内容 or 维度评分. Then re-run with "
-            "`--evaluation-table <path.csv>`.",
-            "- 评价来源 and 数据获取日期 are required columns and the loader refuses a file "
-            "without them, for the same reason the journal table requires an edition: an "
-            "unattributed, undated sentence about a named person cannot be checked by anyone "
-            "later, including the person who wrote it down.",
-            "- 学生身份, 评价年份 and 原文链接 are optional. Where 评价年份 is missing the "
-            "statement cannot be placed in time at all, and a twelve-year-old account of a lab is "
-            "not a current one.",
-            "- There is no collection command to run first, and there will not be one. This is "
-            "the one table with no worklist generator: `journal-worklist` can write the list of "
-            "journals because the corpus already names them, and nothing in a corpus names the "
-            "places people talk about an advisor.",
+            en("To supply one: search wherever such statements are kept for this advisor, read the "
+               "pages yourself, and record what you find as UTF-8 CSV carrying at least the columns "
+               "导师姓名, 评价来源, 数据获取日期 and one of 评价内容 or 维度评分. Then re-run with "
+               "`--evaluation-table <path.csv>`."),
+            en("- 评价来源 and 数据获取日期 are required columns and the loader refuses a file "
+               "without them, for the same reason the journal table requires an edition: an "
+               "unattributed, undated sentence about a named person cannot be checked by anyone "
+               "later, including the person who wrote it down."),
+            en("- 学生身份, 评价年份 and 原文链接 are optional. Where 评价年份 is missing the "
+               "statement cannot be placed in time at all, and a twelve-year-old account of a lab is "
+               "not a current one."),
+            en("- There is no collection command to run first, and there will not be one. This is "
+               "the one table with no worklist generator: `journal-worklist` can write the list of "
+               "journals because the corpus already names them, and nothing in a corpus names the "
+               "places people talk about an advisor."),
         ]
 
     counts = evaluations["counts"]
     provenance = evaluations["provenance"]
     lines = [
-        f"{counts['evaluations_total']} statement(s) attributed to this advisor, out of "
-        f"{counts['rows_in_file']} usable row(s) in the file. Each one is printed below with the "
-        f"source it came from and the day that source was read. They are not scored, not averaged "
-        f"and not summarised.",
+        en("{evaluations_total} statement(s) attributed to this advisor, out of "
+           "{rows_in_file} usable row(s) in the file. Each one is printed below with "
+           "the source it came from and the day that source was read. They are not "
+           "scored, not averaged and not summarised.",
+           evaluations_total=counts['evaluations_total'], rows_in_file=counts['rows_in_file']),
         "",
-        "| what | count | of |",
+        en("| what | count | of |"),
         "|---|---|---|",
-        f"| statements attributed to this advisor | {counts['evaluations_total']} | "
-        f"{counts['rows_in_file']} usable rows in the file |",
-        f"| ... carrying a 评价年份 | {counts['rows_with_year']} | "
-        f"{counts['evaluations_total']} |",
-        f"| ... carrying no 评价年份, so not placeable in time | {counts['rows_without_year']} | "
-        f"{counts['evaluations_total']} |",
-        f"| ... carrying a 原文链接 | {counts['rows_with_url']} | {counts['evaluations_total']} |",
-        f"| ... carrying a 维度评分 | {counts['rows_with_rating']} | "
-        f"{counts['evaluations_total']} |",
-        f"| distinct 评价来源 they came from | {counts['source_count']} | "
-        f"{counts['evaluations_total']} statements |",
+        en("| statements attributed to this advisor | {evaluations_total} | "
+           "{rows_in_file} usable rows in the file |",
+           evaluations_total=counts['evaluations_total'], rows_in_file=counts['rows_in_file']),
+        en("| ... carrying a 评价年份 | {rows_with_year} | {evaluations_total} |", rows_with_year=counts['rows_with_year'], evaluations_total=counts['evaluations_total']),
+        en("| ... carrying no 评价年份, so not placeable in time | {rows_without_year} | "
+           "{evaluations_total} |",
+           rows_without_year=counts['rows_without_year'], evaluations_total=counts['evaluations_total']),
+        en("| ... carrying a 原文链接 | {rows_with_url} | {evaluations_total} |", rows_with_url=counts['rows_with_url'], evaluations_total=counts['evaluations_total']),
+        en("| ... carrying a 维度评分 | {rows_with_rating} | {evaluations_total} |", rows_with_rating=counts['rows_with_rating'], evaluations_total=counts['evaluations_total']),
+        en("| distinct 评价来源 they came from | {source_count} | {evaluations_total} "
+           "statements |",
+           source_count=counts['source_count'], evaluations_total=counts['evaluations_total']),
     ]
 
     year_range = evaluations["year_range"]
     date_range = evaluations["retrieved_on_range"]
     span = (
-        f"{year_range[0]} to {year_range[1]}" if year_range and year_range[0] != year_range[1]
-        else f"{year_range[0]} only" if year_range
-        else "not recorded — no row carries a year"
+        en("{year_range_0} to {year_range_1}", year_range_0=year_range[0], year_range_1=year_range[1]) if year_range and year_range[0] != year_range[1]
+        else en("{year_range_0} only", year_range_0=year_range[0]) if year_range
+        else en("not recorded — no row carries a year")
     )
     lines += [
         "",
-        f"- time span the statements themselves cover: {span}, over the "
-        f"{counts['rows_with_year']} of {counts['evaluations_total']} row(s) that carry a year"
+        en("- time span the statements themselves cover: {span}, over the "
+           "{rows_with_year} of {evaluations_total} row(s) that carry a year",
+           span=span, rows_with_year=counts['rows_with_year'], evaluations_total=counts['evaluations_total'])
         # Only when there are any. A dangling "the other 0" reads as a rounding
         # artefact and invites the reader to check a number that is not there.
-        + (f". The other {counts['rows_without_year']} row(s) sit outside this span rather than "
-           f"inside it, and widening the span to cover them would be inventing a date"
+        + (en(". The other {rows_without_year} row(s) sit outside this span rather than "
+              "inside it, and widening the span to cover them would be inventing a date",
+              rows_without_year=counts['rows_without_year'])
            if counts["rows_without_year"] else ""),
-        "- days the pages were read: "
-        + (f"{date_range[0]} to {date_range[1]}" if date_range and date_range[0] != date_range[1]
-           else f"{date_range[0]}" if date_range else "not recorded"),
-        f"- attribution to this advisor: {evaluations['advisor_filter']}",
+        en("- days the pages were read: {days}",
+           days=en("{date_range_0} to {date_range_1}", date_range_0=date_range[0], date_range_1=date_range[1])
+           if date_range and date_range[0] != date_range[1]
+           else f"{date_range[0]}" if date_range else en("not recorded")),
+        en("- attribution to this advisor: {advisor_filter}", advisor_filter=evaluations['advisor_filter']),
     ]
     if evaluations["advisor_note"]:
-        lines.append(f"- attribution note: {evaluations['advisor_note']}")
+        lines.append(en("- attribution note: {advisor_note}", advisor_note=en(evaluations['advisor_note'])))
     if evaluations["suppressed"]:
-        lines.append("- nothing is printed below, and the reasons are not rounded off:")
-        lines += [f"  - {reason}" for reason in evaluations["suppressed_reasons"]]
+        lines.append(en("- nothing is printed below, and the reasons are not rounded off:"))
+        lines += [f"  - {en(reason)}" for reason in evaluations["suppressed_reasons"]]
 
     roles = evaluations["student_roles"]
     lines += [
         "",
-        f"- 学生身份 as recorded: {_fmt_input(roles) or 'not recorded on any row'}. This is what "
-        f"each writer said about themselves and nothing verified it",
+        en("- 学生身份 as recorded: {roles}. This is what each writer said about "
+           "themselves and nothing verified it",
+           roles=_fmt_input(roles) or en('not recorded on any row')),
         "",
-        "Where the statements came from. Ten statements from one thread and ten from ten sites "
-        "are different evidence, so the per-source counts are printed rather than one total:",
+        en("Where the statements came from. Ten statements from one thread and ten from ten sites "
+           "are different evidence, so the per-source counts are printed rather than one total:"),
         "",
-        "| 评价来源 | statements | of |",
+        en("| 评价来源 | statements | of |"),
         "|---|---|---|",
     ]
     if evaluations["sources"]:
@@ -3998,44 +4133,46 @@ def _evaluations_body(evaluations: dict[str, Any] | None, note: str) -> list[str
             for source, count in evaluations["sources"].items()
         ]
     else:
-        lines.append(f"| (no row carries a source) | 0 | {counts['evaluations_total']} |")
+        lines.append(en("| (no row carries a source) | 0 | {evaluations_total} |", evaluations_total=counts['evaluations_total']))
 
     lines += [
         "",
-        "Where the file came from. Without this a quotation in this section is a sentence with no "
-        "page and no day attached:",
+        en("Where the file came from. Without this a quotation in this section is a sentence with no "
+           "page and no day attached:"),
         "",
-        f"- file: `{provenance.get('path') or 'not recorded'}` (read as "
-        f"{provenance.get('encoding') or 'unknown encoding'})",
-        f"- rows read {provenance.get('rows_read', '?')}; rejected "
-        f"{provenance.get('rejected', 0)}; exact duplicates dropped "
-        f"{provenance.get('duplicates_dropped', 0)}",
-        f"- sources present anywhere in the file, including rows belonging to other advisors: "
-        f"{_fmt_input(provenance.get('sources_in_file')) or 'none'}",
-        f"- optional columns the file does not carry: "
-        f"{_fmt_input(provenance.get('columns_missing_optional')) or 'none — all present'}",
+        en("- file: `{path}` (read as {encoding})", path=provenance.get('path') or en('not recorded'), encoding=provenance.get('encoding') or en('unknown encoding')),
+        en("- rows read {rows_read}; rejected {rejected}; exact duplicates dropped "
+           "{duplicates_dropped}",
+           rows_read=provenance.get('rows_read', '?'), rejected=provenance.get('rejected', 0), duplicates_dropped=provenance.get('duplicates_dropped', 0)),
+        en("- sources present anywhere in the file, including rows belonging to other "
+           "advisors: {sources_in_file}",
+           sources_in_file=_fmt_input(provenance.get('sources_in_file')) or en('none')),
+        en("- optional columns the file does not carry: {columns_missing_optional}", columns_missing_optional=_fmt_input(provenance.get('columns_missing_optional')) or en('none — all present')),
         "",
-        "**The statements, in the order the file supplied them.** That order is the order they "
-        "were collected in and is not a ranking: sorting statements about a person by anything "
-        "would be building the judgement this section refuses to make.",
+        en("**The statements, in the order the file supplied them.** That order is the order they "
+           "were collected in and is not a ranking: sorting statements about a person by anything "
+           "would be building the judgement this section refuses to make."),
         "",
     ]
     if evaluations["entries"]:
         for number, entry in enumerate(evaluations["entries"], start=1):
+            # The labels are the file's own column names, kept as written in both
+            # languages: they are what a reader searches the CSV for.
+            unrecorded = en("not recorded")
             parts = [
-                f"来源 {entry['source'] or 'not recorded'}",
-                f"获取日期 {entry['retrieved_on'] or entry['retrieved_on_raw'] or 'not recorded'}",
-                f"评价年份 {entry['year'] if entry['year'] is not None else 'not recorded'}",
-                f"学生身份 {entry['student_role'] or 'not recorded'}",
+                f"来源 {entry['source'] or unrecorded}",
+                f"获取日期 {entry['retrieved_on'] or entry['retrieved_on_raw'] or unrecorded}",
+                f"评价年份 {entry['year'] if entry['year'] is not None else unrecorded}",
+                f"学生身份 {entry['student_role'] or unrecorded}",
             ]
             if entry["content"]:
                 parts.append(f"评价内容 {entry['content']}")
             if entry["rating"]:
                 parts.append(f"维度评分 {entry['rating']}")
-            parts.append(f"原文链接 {entry['url'] or 'not recorded'}")
+            parts.append(f"原文链接 {entry['url'] or unrecorded}")
             lines.append(f"- **[{number}]** " + " — ".join(parts))
     else:
-        lines.append("- none")
+        lines.append(en("- none"))
     return lines
 
 
@@ -4057,24 +4194,33 @@ def render_markdown(report: dict[str, Any]) -> str:
     report. The one place a person is placed above another is the second table
     in Section 2, which ranks the people named by first-author slots; the roster
     above it is still never ordered by a count.
+
+    Written in the report's own language — English for what `build_report`
+    returns, the other one for a `localize` copy — whatever language the caller's
+    messages are in.
     """
-    title = f"# Observed publication pattern — {report['author_name'] or '(unnamed researcher)'}"
+    with using(report.get("language") or "en"):
+        return _render_markdown(report)
+
+
+def _render_markdown(report: Mapping[str, Any]) -> str:
+    title = en("# Observed publication pattern — {author_name}", author_name=report['author_name'] or en('(unnamed researcher)'))
     if report["refused"]:
         gate = report["gate"]
         observed = "\n".join(f"- {key}: {value}" for key, value in gate["observed"].items())
         return "\n".join([
             title,
             "",
-            f"## Report refused — gate {gate['id']} ({gate['name']})",
+            en("## Report refused — gate {id} ({name})", id=gate['id'], name=en(gate['name'])),
             "",
-            gate["message"],
+            en(gate["message"]),
             "",
-            "Observed:",
-            observed or "- (none)",
+            en("Observed:"),
+            observed or en("- (none)"),
             "",
         ])
 
-    parts = [title, "", f"_Generated {report['generated_at']}._", ""]
+    parts = [title, "", en("_Generated {generated_at}._", generated_at=report['generated_at']), ""]
     for section in report["sections"]:
         parts += [f"## {section['id']}. {section['title']}", ""]
         # Before the prose, and `.get` so a section dict built by an older caller
@@ -4088,28 +4234,82 @@ def render_markdown(report: dict[str, Any]) -> str:
     return "\n".join(parts).rstrip() + "\n"
 
 
-def json_record(report: dict[str, Any]) -> dict[str, Any]:
+#: Keys of a report that are not part of its record.
+#:
+#: `sections` is a view of `metrics`; keeping both would let the two drift apart
+#: with no way to tell which one is authoritative. `section_inputs` is the same
+#: data again, kept so `localize` can write the sections in another language, and
+#: the last two say which language a `localize` copy is in and what it was made
+#: from — facts about a page, not about the corpus.
+_NOT_RECORDED = frozenset({"sections", "section_inputs", "language", "localized_from"})
+
+
+def localize(report: Mapping[str, Any], lang: str) -> dict[str, Any]:
+    """This report in `lang`: its sections and caveats rewritten, every number unchanged.
+
+    `build_report` writes English, the language every sentence in this module was
+    argued in, and this is how the other language gets a page. Nothing is
+    recomputed: the sections are rebuilt from the very values `build_report`
+    built them from, which it keeps under `section_inputs` for the purpose, so the
+    two pages can say a count in different words but cannot disagree about it.
+
+    The copy records its language, which every renderer reads, and the report it
+    was made from, which `json_record` reads: the record is the source report's
+    either way, so the JSON embedded in each page and written beside them is one
+    document. A refusal has no sections to rebuild — its page is written from the
+    gate when it is rendered — so its copy differs only in the language.
+    """
+    resolved = normalize(lang)
+    if resolved is None:
+        raise ValueError(f"unknown report language {lang!r}; expected one of {REPORT_LANGUAGES}")
+    source = report.get("localized_from") or report
+    view = dict(source)
+    view["language"] = resolved
+    view["localized_from"] = source
+    inputs = source.get("section_inputs")
+    if inputs:
+        used: dict[str, str] = {}
+        with using(resolved):
+            view["sections"] = _build_sections(used=used, **inputs)
+        view["caveats"] = used
+    return view
+
+
+def json_record(report: Mapping[str, Any]) -> dict[str, Any]:
     """
     The machine-readable half: the same numbers, without the rendered prose.
 
-    `sections` is dropped because it is a view of `metrics`; keeping both would
-    let the two drift apart with no way to tell which one is authoritative.
+    One record per report, whatever language it was rendered in: a `localize`
+    copy hands back the record of the report it was made from, English
+    sentences and all, because those are the ones a script can match on.
     """
-    return {key: value for key, value in report.items() if key != "sections"}
+    source = report.get("localized_from") or report
+    return {key: value for key, value in source.items() if key not in _NOT_RECORDED}
 
 
-def write_report(report: dict[str, Any], output_dir: str | Path) -> dict[str, str]:
-    """Write the Markdown and the JSON side by side. Returns both paths."""
+def write_report(report: Mapping[str, Any], output_dir: str | Path) -> dict[str, str]:
+    """Write the Markdown, and beside the English one the JSON. Returns the paths.
+
+    The Markdown is named for the report's language (`i18n.report_suffix`):
+    English keeps the file name every earlier release wrote and Chinese adds
+    `.zh-CN`. The JSON is written beside the English Markdown only. It holds
+    numbers, which have no language, and a copy beside the Chinese file would be
+    one more file to keep in step with the first.
+    """
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    lang = report.get("language") or "en"
     stamp = datetime.fromisoformat(report["generated_at"]).strftime("%Y%m%d_%H%M%S")
-    markdown_path = directory / f"advisor_profile_{stamp}.md"
-    json_path = directory / f"advisor_profile_{stamp}.json"
+    markdown_path = directory / f"advisor_profile_{stamp}{report_suffix(lang)}.md"
     markdown_path.write_text(render_markdown(report), encoding="utf-8")
-    json_path.write_text(
-        json.dumps(json_record(report), ensure_ascii=False, indent=2), encoding="utf-8"
-    )
-    return {"markdown": str(markdown_path), "json": str(json_path)}
+    paths = {"markdown": str(markdown_path)}
+    if lang == "en":
+        json_path = directory / f"advisor_profile_{stamp}.json"
+        json_path.write_text(
+            json.dumps(json_record(report), ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+        paths["json"] = str(json_path)
+    return paths
 
 
 # --- Side by side ---
@@ -4188,6 +4388,7 @@ def _comparison_score_key(entry: Mapping[str, Any]) -> tuple[int, float, str, st
     return (0 if value is not None else 1, -(value or 0.0), label.casefold(), label)
 
 
+@in_language("en")
 def build_comparison(
     entries: Sequence[Mapping[str, Any]],
     weights: Mapping[str, float] | None = None,
@@ -4289,12 +4490,12 @@ def build_comparison(
 def _component_cell(score: Mapping[str, Any] | None, name: str, field: str) -> str:
     """One component's value for one corpus, or why there is none."""
     if not score:
-        return "no report"
+        return en("no report")
     for item in score.get("components") or []:
         if item.get("name") == name:
             return _fmt_score(item.get(field), 3 if field == "normalised" else 2)
     if name in (score.get("unavailable") or []):
-        return "no data"
+        return en("no data")
     return "n/a"
 
 
@@ -4312,8 +4513,8 @@ def _stars_cell(item: Mapping[str, Any]) -> str:
     """A corpus's star band for the ranked table, or why it has none."""
     count = item.get("stars")
     if count is None:
-        return "none"
-    return f"{'★' * int(count)}{'☆' * (STAR_MAX - int(count))} ({int(count)} of {STAR_MAX})"
+        return en("none")
+    return en("{value}{value_2} ({count} of {star_max})", value='★' * int(count), value_2='☆' * (STAR_MAX - int(count)), count=int(count), star_max=STAR_MAX)
 
 
 def _letter_cell(item: Mapping[str, Any]) -> str:
@@ -4323,7 +4524,7 @@ def _letter_cell(item: Mapping[str, Any]) -> str:
     `letter_grade` derives the letter and the star count in one call; a renderer
     that worked one of them out again could print a pair that disagrees.
     """
-    return item.get("letter") or "none"
+    return item.get("letter") or en("none")
 
 
 def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
@@ -4345,65 +4546,88 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
     the star column relabelled, printed with `ranking.LETTER_BASIS` beside it.
     Percentile and quantile position are still not produced, and the register
     saying so is printed at the foot of the page rather than summarised.
+
+    Written in the comparison's language: English for what `build_comparison`
+    returns, the other one for a `localize_comparison` copy.
     """
+    with using(comparison.get("language") or "en"):
+        return _render_comparison_markdown(comparison)
+
+
+def localize_comparison(comparison: Mapping[str, Any], lang: str) -> dict[str, Any]:
+    """The comparison page in `lang`. Nothing on it is rebuilt.
+
+    Unlike a report's sections, nothing on this page is prose built ahead of the
+    render: the sentences `build_comparison` stores (`statements`, each
+    corpus's reasons) carry their own templates (`i18n.Text`), so naming the
+    language is all a copy needs. The JSON stays one file, written beside the
+    English page.
+    """
+    resolved = normalize(lang)
+    if resolved is None:
+        raise ValueError(f"unknown report language {lang!r}; expected one of {REPORT_LANGUAGES}")
+    return {**comparison, "language": resolved}
+
+
+def _render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
     corpora = list(comparison.get("corpora") or [])
-    labels = [item["label"] or "(unnamed)" for item in corpora]
+    labels = [item["label"] or en("(unnamed)") for item in corpora]
     weights_used = comparison.get("weights_used") or {}
     ranking = comparison.get("ranking") or {}
     statements = list(comparison.get("statements") or [])
 
     parts = [
-        f"# Corpora side by side — {len(corpora)} corpora",
+        en("# Corpora side by side — {n_corpora} corpora", n_corpora=len(corpora)),
         "",
-        f"_Generated {comparison.get('generated_at', '')}._",
+        en("_Generated {generated_at}._", generated_at=comparison.get('generated_at', '')),
         "",
-        f"Column order: {comparison.get('order', COMPARISON_ORDER)}",
+        en("Column order: {order}", order=en(comparison.get('order', COMPARISON_ORDER))),
         "",
-        "This page ranks the corpora on it by composite score and says which of two scored "
-        "higher. Read that for exactly what it is: a position among the corpora somebody loaded "
-        "into this run, decided by one weighted mean under one weight table printed below. Every "
-        "score here is the same number Section 16 of that corpus's own report prints and carries "
-        "every limit stated there — it is not comparable across fields, the citation components "
-        "are bounded by each corpus's own search window, and a corpus with thin citation coverage "
-        "scores on fewer components than one without.",
+        en("This page ranks the corpora on it by composite score and says which of two scored "
+           "higher. Read that for exactly what it is: a position among the corpora somebody loaded "
+           "into this run, decided by one weighted mean under one weight table printed below. Every "
+           "score here is the same number Section 16 of that corpus's own report prints and carries "
+           "every limit stated there — it is not comparable across fields, the citation components "
+           "are bounded by each corpus's own search window, and a corpus with thin citation coverage "
+           "scores on fewer components than one without."),
         "",
-        ranking.get("caveat", ""),
+        en(ranking.get("caveat", "")),
         "",
-        "## Ranked",
+        en("## Ranked"),
         "",
-        f"Method: {ranking.get('method', RANK_METHOD)}",
+        en("Method: {method}", method=en(ranking.get('method', RANK_METHOD))),
         "",
-        f"Ties: {ranking.get('tie_note', RANK_TIE_NOTE)}",
+        en("Ties: {tie_note}", tie_note=en(ranking.get('tie_note', RANK_TIE_NOTE))),
         "",
-        "| # | corpus | score out of 100 | stars | letter | source | records | components scored "
-        "| state |",
+        en("| # | corpus | score out of 100 | stars | letter | source | records | components scored "
+           "| state |"),
         "|---|---|---|---|---|---|---|---|---|",
     ]
     for item in corpora:
-        label = item["label"] or "(unnamed)"
+        label = item["label"] or en("(unnamed)")
         score = item.get("score") or {}
         if item["refused"]:
             gate = item["gate"] or {}
-            state = f"report refused — gate {gate.get('id', '?')} ({gate.get('name', '')})"
+            state = en("report refused — gate {id} ({name})", id=gate.get('id', '?'), name=en(gate.get('name', '')))
             size = "n/a"
-            value = "not computed"
+            value = en("not computed")
             scored = "n/a"
         else:
-            state = "citations joined" if item.get("impact") else "no citation data"
+            state = en("citations joined") if item.get("impact") else en("no citation data")
             if item.get("warnings"):
                 # Printed before the citation state, because "this may not be one
                 # person, or may not be all of it" outranks "these numbers have
                 # no citation counts". Labelled `warning`, not `identity warning`:
                 # G1 is a coverage condition and calling it an identity one told
                 # the reader the wrong thing to go and check.
-                state = "warning " + ", ".join(
+                state = en("warning {ids}; {state}", ids=", ".join(
                     str((w or {}).get("id", "?")) for w in item["warnings"]
-                ) + "; " + state
+                ), state=state)
             size = str(item.get("corpus_size", "?"))
-            value = "withheld (too few components)" if score.get("suppressed") \
+            value = en("withheld (too few components)") if score.get("suppressed") \
                 else _fmt_score(score.get("score"), 1)
-            scored = f"{score.get('denominator', '?')} of {score.get('components_registered', '?')}"
-        place = f"{item['rank']} of {item.get('rank_of', '?')}" if item.get("ranked") else "unplaced"
+            scored = en("{denominator} of {components_registered}", denominator=score.get('denominator', '?'), components_registered=score.get('components_registered', '?'))
+        place = en("{rank} of {rank_of}", rank=item['rank'], rank_of=item.get('rank_of', '?')) if item.get("ranked") else en("unplaced")
         parts.append(
             f"| {place} | {label} | {value} | {_stars_cell(item)} | {_letter_cell(item)} | "
             f"`{item['source']}` | {size} | {scored} | {state} |"
@@ -4411,89 +4635,91 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
 
     parts += [
         "",
-        f"Letters: {LETTER_BASIS}",
+        en("Letters: {letter_basis}", letter_basis=en(LETTER_BASIS)),
         "",
-        f"Positions were taken over the {ranking.get('n_scored', ranking.get('n_ranked', 0))} "
-        f"corpora that carried a score, "
-        f"out of {ranking.get('denominator', len(corpora))} on this page. That denominator is not "
-        "decoration: first of two and first of nine are different facts and the column cannot tell "
-        "them apart on its own.",
+        en("Positions were taken over the {n_scored} corpora that carried a score, "
+           "out of {denominator} on this page. That denominator is not decoration: "
+           "first of two and first of nine are different facts and the column cannot "
+           "tell them apart on its own.",
+           n_scored=ranking.get('n_scored', ranking.get('n_ranked', 0)), denominator=ranking.get('denominator', len(corpora))),
     ]
     if ranking.get("suppressed"):
         parts += [
             "",
-            f"No position was assigned to anything. Fewer than "
-            f"{ranking.get('min_ranked_corpora', 2)} corpora on this page carried a score, and "
-            "with fewer than that there is nothing to be first among.",
+            en("No position was assigned to anything. Fewer than {min_ranked_corpora} "
+               "corpora on this page carried a score, and with fewer than that there is "
+               "nothing to be first among.",
+               min_ranked_corpora=ranking.get('min_ranked_corpora', 2)),
         ]
     unranked = [row for row in ranking.get("unranked") or []]
     if unranked:
-        parts += ["", "Corpora holding no position, and why. None of them was scored as zero and "
-                  "none was placed last, because last is a position:", ""]
+        parts += ["", en("Corpora holding no position, and why. None of them was scored as zero and "
+                     "none was placed last, because last is a position:"), ""]
         parts += [
-            f"- **{row['label'] or '(unnamed)'}** — {row.get('reason', 'no reason recorded')}"
+            en("- **{label}** — {reason}", label=row['label'] or en('(unnamed)'),
+               reason=en(row.get('reason') or 'no reason recorded'))
             for row in unranked
         ]
     comparability = ranking.get("comparability") or {}
     if comparability.get("note"):
-        parts += ["", comparability["note"]]
+        parts += ["", en(comparability["note"])]
 
     if statements:
         parts += [
             "",
-            "## Which of two scored higher",
+            en("## Which of two scored higher"),
             "",
-            "One sentence per adjacent pair in rank order — which is the column order above only "
-            "when the page is ordered by score, so read the ranks rather than the columns. Each "
-            "sentence carries the difference and both component counts, and refuses itself "
-            "outright when the two scores were not built from the same components under the same "
-            "table: a difference between two weighted means over different material has no "
-            "subject, and is withheld rather than printed under a hedge.",
+            en("One sentence per adjacent pair in rank order — which is the column order above only "
+               "when the page is ordered by score, so read the ranks rather than the columns. Each "
+               "sentence carries the difference and both component counts, and refuses itself "
+               "outright when the two scores were not built from the same components under the same "
+               "table: a difference between two weighted means over different material has no "
+               "subject, and is withheld rather than printed under a hedge."),
             "",
         ]
-        parts += [f"- {statement['statement']}" for statement in statements]
+        parts += [f"- {en(statement['statement'])}" for statement in statements]
 
     parts += [
         "",
-        "## Weight table in effect",
+        en("## Weight table in effect"),
         "",
-        "One table for every corpus on this page. A score computed under a different table is a "
-        "different number and does not belong in these columns.",
+        en("One table for every corpus on this page. A score computed under a different table is a "
+           "different number and does not belong in these columns."),
         "",
-        "| component | weight |",
+        en("| component | weight |"),
         "|---|---|",
     ]
     parts += [f"| {name} | {_fmt_score(weight)} |" for name, weight in weights_used.items()]
 
     parts += [
         "",
-        "## Composite score",
+        en("## Composite score"),
         "",
-        "| corpus | score out of 100 | components scored | components with no data |",
+        en("| corpus | score out of 100 | components scored | components with no data |"),
         "|---|---|---|---|",
     ]
     for item in corpora:
         score = item.get("score")
         if item["refused"] or not score:
-            parts.append(f"| {item['label'] or '(unnamed)'} | not computed | n/a | n/a |")
+            parts.append(en("| {label} | not computed | n/a | n/a |", label=item['label'] or en('(unnamed)')))
             continue
-        value = "withheld (too few components)" if score.get("suppressed") \
+        value = en("withheld (too few components)") if score.get("suppressed") \
             else _fmt_score(score.get("score"), 1)
         parts.append(
-            f"| {item['label'] or '(unnamed)'} | {value} | {score.get('denominator', '?')} of "
-            f"{score.get('components_registered', '?')} | "
-            f"{', '.join(score.get('unavailable') or []) or 'none'} |"
+            en("| {label} | {value} | {denominator} of {components_registered} | "
+               "{unavailable} |",
+               label=item['label'] or en('(unnamed)'), value=value, denominator=score.get('denominator', '?'), components_registered=score.get('components_registered', '?'), unavailable=', '.join(score.get('unavailable') or []) or en('none'))
         )
 
     component_names = list(weights_used.keys())
     parts += [
         "",
-        "## Component values, normalised to [0, 1]",
+        en("## Component values, normalised to [0, 1]"),
         "",
-        "Rows are in the components' registration order — never reordered by what is in them. "
-        "Columns are in the page order named at the head of this file.",
+        en("Rows are in the components' registration order — never reordered by what is in them. "
+           "Columns are in the page order named at the head of this file."),
         "",
-        "| component | " + " | ".join(labels) + " |",
+        en("| component | {columns} |", columns=" | ".join(labels)),
         "|---" * (len(labels) + 1) + "|",
     ]
     for name in component_names:
@@ -4502,25 +4728,28 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
 
     if len(corpora) >= 2:
         reference = corpora[0]
-        ref_label = reference["label"] or "(unnamed)"
+        ref_label = reference["label"] or en("(unnamed)")
         others = corpora[1:]
         why = (
-            "the highest-scoring column under the weight table below"
+            en("the highest-scoring column under the weight table below")
             if comparison.get("order_by", ORDER_BY_SCORE) == ORDER_BY_SCORE
-            else "the column whose label sorts first, which is not a statement about the corpus"
+            else en("the column whose label sorts first, which is not a statement about the corpus")
         )
         parts += [
             "",
-            f"## Differences from {ref_label}",
+            en("## Differences from {ref_label}", ref_label=ref_label),
             "",
-            f"{ref_label} is the reference column because it is {why}. A difference here is an "
-            "arithmetic fact about two normalised component values, and it is a per-component "
-            "figure: it does not aggregate, and a corpus ahead on the total can sit behind on any "
-            "row of this table. Blank where either side has no value to subtract.",
+            en("{ref_label} is the reference column because it is {why}. A difference "
+               "here is an arithmetic fact about two normalised component values, and it "
+               "is a per-component figure: it does not aggregate, and a corpus ahead on "
+               "the total can sit behind on any row of this table. Blank where either "
+               "side has no value to subtract.",
+               ref_label=ref_label, why=why),
             "",
-            "| component | " + " | ".join(
-                f"{item['label'] or '(unnamed)'} minus {ref_label}" for item in others
-            ) + " |",
+            en("| component | {columns} |", columns=" | ".join(
+                en("{label} minus {ref_label}", label=item['label'] or en('(unnamed)'), ref_label=ref_label)
+                for item in others
+            )),
             "|---" * (len(others) + 1) + "|",
         ]
         for name in component_names:
@@ -4533,43 +4762,52 @@ def render_comparison_markdown(comparison: Mapping[str, Any]) -> str:
 
     parts += [
         "",
-        "## What this page still does not contain",
+        en("## What this page still does not contain"),
         "",
-        "- No percentile and no quantile position of any score on this page. Those need a "
-        "reference population; the corpora here are the few somebody chose to load, and a "
-        "position inside that set would move whenever an unrelated corpus was added or dropped. "
-        "The citation percentiles behind Section 15 of a corpus's own report are a different "
-        "quantity: each paper's count placed among every OpenAlex work sharing its topic and "
-        "year, a population that does not depend on what was loaded here.",
-        "- No fitted trend, slope or year-over-year change, and nothing ranked here reads one. "
-        "Section 9 of each corpus's own report fits a slope with its interval beside it; a rank "
-        "is a position at one moment and never a movement between two.",
-        "- No ordering of people. What is ranked here is corpora. Section 2 of each corpus's own "
-        "report ranks the people it names by first-author slots, in a second table beside a "
-        "roster that is itself never sorted by a count.",
-        "- No Journal Impact Factor, JCR quartile or CAS partition on this page. Those are joined "
-        "per corpus from a table the reader fills in by hand, in Section 18 of each corpus's own "
-        "report, with the edition and the retrieval date printed beside every number. They are "
-        "not fetched, not shipped, and never enter the score ranked above.",
+        en("- No percentile and no quantile position of any score on this page. Those need a "
+           "reference population; the corpora here are the few somebody chose to load, and a "
+           "position inside that set would move whenever an unrelated corpus was added or dropped. "
+           "The citation percentiles behind Section 15 of a corpus's own report are a different "
+           "quantity: each paper's count placed among every OpenAlex work sharing its topic and "
+           "year, a population that does not depend on what was loaded here."),
+        en("- No fitted trend, slope or year-over-year change, and nothing ranked here reads one. "
+           "Section 9 of each corpus's own report fits a slope with its interval beside it; a rank "
+           "is a position at one moment and never a movement between two."),
+        en("- No ordering of people. What is ranked here is corpora. Section 2 of each corpus's own "
+           "report ranks the people it names by first-author slots, in a second table beside a "
+           "roster that is itself never sorted by a count."),
+        en("- No Journal Impact Factor, JCR quartile or CAS partition on this page. Those are joined "
+           "per corpus from a table the reader fills in by hand, in Section 18 of each corpus's own "
+           "report, with the edition and the retrieval date printed beside every number. They are "
+           "not fetched, not shipped, and never enter the score ranked above."),
         "",
-        "The register behind the first two, verbatim:",
+        en("The register behind the first two, verbatim:"),
         "",
     ]
     for group in ("refused_by_design", "not_computable_here"):
-        parts += [f"- **{name}** — {reason}" for name, reason in RANKING_EXCLUSIONS[group]]
+        parts += _register_lines(RANKING_EXCLUSIONS[group])
     parts.append("")
     return "\n".join(parts).rstrip() + "\n"
 
 
 def write_comparison(comparison: Mapping[str, Any], output_dir: str | Path) -> dict[str, str]:
-    """Write the side-by-side Markdown and its JSON record. Returns both paths."""
+    """Write the side-by-side Markdown, and beside the English one its JSON record.
+
+    Named for the comparison's language the way `write_report` names a report.
+    Returns the paths written.
+    """
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
+    lang = comparison.get("language") or "en"
     stamp = datetime.fromisoformat(str(comparison["generated_at"])).strftime("%Y%m%d_%H%M%S")
-    markdown_path = directory / f"advisor_compare_{stamp}.md"
-    json_path = directory / f"advisor_compare_{stamp}.json"
+    markdown_path = directory / f"advisor_compare_{stamp}{report_suffix(lang)}.md"
     markdown_path.write_text(render_comparison_markdown(comparison), encoding="utf-8")
-    json_path.write_text(
-        json.dumps(comparison, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
-    )
-    return {"markdown": str(markdown_path), "json": str(json_path)}
+    paths = {"markdown": str(markdown_path)}
+    if lang == "en":
+        json_path = directory / f"advisor_compare_{stamp}.json"
+        record = {key: value for key, value in comparison.items() if key != "language"}
+        json_path.write_text(
+            json.dumps(record, ensure_ascii=False, indent=2, default=str), encoding="utf-8"
+        )
+        paths["json"] = str(json_path)
+    return paths

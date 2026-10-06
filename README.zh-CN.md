@@ -20,7 +20,7 @@ python scripts/run.py cite    --output-dir ./record
 python scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
 ```
 
-三条命令，一份 HTML 报告。不需要装任何东西，纯标准库。
+三条命令，一份 HTML 报告 —— 中英文各写一份，两份上的数字一模一样。不需要装任何东西，纯标准库。
 
 ## 它回答什么
 
@@ -284,7 +284,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-35 个文件 4963 条断言（装了 PyMuPDF 时；没装时 4960 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-06 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
+36 个文件 5110 条断言（装了 PyMuPDF 时；没装时 5107 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-06 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
 import hook，在每个测试进程里屏蔽
 `requests`、`urllib3`、`pandas`、`numpy`、`matplotlib`、`fitz`、`openpyxl`。
 这是"不需要装东西"这句话唯一的保证，而不是只是嘴上说说：
@@ -292,7 +292,13 @@ import hook，在每个测试进程里屏蔽
 
 ## 已知问题
 
-- 报告是英文，命令行日志是中文。这不是谁能辩护的设计，是它长成这样的，统一是待办。
+- ~~报告是英文，命令行日志是中文。~~ **已解决**：每份报告都中英文各写一份，每份从头到尾只用一种语言。
+  `profile` 写出英文的 `advisor_profile_<时间戳>.html` / `.md` 和中文的
+  `advisor_profile_<时间戳>.zh-CN.html` / `.zh-CN.md`，两份出自同一份算好的报告，
+  所以不可能在某个数字上互相矛盾；`compare` 写出 `advisor_compare_<时间戳>.md` 和 `.zh-CN.md`。
+  JSON 只写一份。命令行（日志、`--help`、报错）的语言依次看 `--lang zh|en`、
+  `$CHECK_YOUR_ADVISOR_LANG` 和系统语言，系统语言不是中文时就是英文。
+  CSV 里的中文列名（`版本来源`、`数据获取日期` 等）在两种语言里都原样保留，因为那是你文件里真实的列名。
 - ~~`cite` 没有自己的缓存。~~ **已解决**：`cite` 和 `journal-risk` 现在各自按
   「哪个接口 + 问的什么」缓存应答，和 PDF 缓存共用一个 SQLite 文件、两张互不干扰的表。
   缓存**每次成功抓取都写入，只在你加了 `--max-age-days N` 时才读取** ——

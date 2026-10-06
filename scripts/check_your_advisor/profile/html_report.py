@@ -39,13 +39,15 @@ the product owner and both recorded rather than silently taken:
   edition and retrieval date of every partition — has to be on screen with the
   number it qualifies.
 
-The page prints a score, a star band derived from it, and no ranking of people.
-The header says exactly that. The distinction is the whole boundary this report
-is built on: a value is a statement about one corpus, a position is a statement
-about people relative to each other, and only the first is derivable from what
-PubMed holds. Ranks exist on the side-by-side page, where the position is among
-corpora a user chose to load and says so; nothing on this page places one person
-above another, and the roster's order control still offers no count column.
+The page prints a score, a star band derived from it, and one ranking of people:
+the second table in Section 2, which orders the people the corpus names by
+first-author slots and prints the roster's size beside the ranks. The header says
+exactly that. Everything else keeps the boundary this report was built on — a
+value is a statement about one corpus, a position is a statement about people
+relative to each other — so the roster itself is still never re-sorted by a
+count, and its order control still offers no count column. Ranks among corpora
+exist on the side-by-side page, where the position is among corpora a user chose
+to load and says so.
 
 Section 17 arrives second in the section list rather than in numeric order, and
 this module renders sections in list order for that reason. It does not sort by
@@ -67,6 +69,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from ..i18n import en, language, report_suffix, using
 from .report import STRATUM_LABEL, json_record
 
 # Figure id -> (report section id, caveat ids that travel with the figure).
@@ -249,10 +252,9 @@ def _render_block(block: Mapping[str, Any], collapsible: bool) -> str:
         # The summary states the row count so a reader who never opens it, and a
         # print engine that fails to expand it, still learns the true magnitude.
         label = _esc(block["header"][0] if block["header"] else "rows")
-        return (
-            f"<details><summary>Table — {len(block['rows'])} rows, first column "
-            f"{label}</summary>{table}</details>"
-        )
+        summary = en("Table — {n_rows} rows, first column {label}",
+                     n_rows=len(block["rows"]), label=label)
+        return f"<details><summary>{summary}</summary>{table}</details>"
     return table
 
 
@@ -291,7 +293,7 @@ def _figure_rows_table(rows: Sequence[Mapping[str, Any]]) -> str:
         for key in row:
             if key not in columns:
                 columns.append(key)
-    header = [column.replace("_", " ") for column in columns]
+    header = [en(column.replace("_", " ")) for column in columns]
     body = [[_flat(row.get(column, "")) for column in columns] for row in rows]
     return _render_table(header, body)
 
@@ -319,7 +321,7 @@ def _render_figure(
         # keyboard; without it the right-hand years are mouse-only.
         content = (
             f'<div class="figscroll" tabindex="0" role="region" '
-            f'aria-label="{_attr(figure_id)} figure, scrollable">{svg}</div>'
+            f'aria-label="{_attr(en("{figure} figure, scrollable", figure=figure_id))}">{svg}</div>'
         )
     else:
         # A degenerate state ships prose instead of an axis. Never an empty frame.
@@ -335,8 +337,8 @@ def _render_figure(
     parts += [_caveat_html(caveats[key], key) for key in caveat_ids if key in caveats]
     if rows:
         parts.append(
-            f"<details><summary>Data table for this figure — {len(rows)} rows</summary>"
-            f"{_figure_rows_table(rows)}</details>"
+            f"<details><summary>{en('Data table for this figure — {n_rows} rows', n_rows=len(rows))}"
+            f"</summary>{_figure_rows_table(rows)}</details>"
         )
     parts.append("</figure>")
     return "".join(parts)
@@ -388,18 +390,31 @@ _ROSTER_ORDERS: tuple[tuple[str, str], ...] = (
 )
 
 
+# Printed under the order control. The control still offers no count, so the
+# order a reader meets first is one nobody's output can change; the one ranking
+# of people on the page is the separate table in Section 2, which says so itself.
+_ROSTER_ORDER_NOTE = (
+    "Ordering by appearances, lead slots or equal-contribution flags is not offered here: "
+    "ordering people by a count is a productivity ranking, so this table stays in an order no "
+    "count can change. The one ranking of people in this report is the separate table under "
+    "it, by first-author slots, which says so itself. Filtering hides rows on "
+    "screen only; the counts in this section and every figure are over the whole roster, "
+    "and printing restores every row."
+)
+
+
 def _roster_cell(row: Mapping[str, Any], field: str) -> str:
     if field == "name":
         return f"{row.get('name', '')}{row.get('marker', '')}"
     if field == "stratum":
-        return STRATUM_LABEL.get(str(row.get("stratum")), str(row.get("stratum", "")))
+        return en(STRATUM_LABEL.get(str(row.get("stratum")), str(row.get("stratum", ""))))
     if field == "censoring":
         marks = [
-            label
+            en(label)
             for label, flag in (("left", row.get("left_censored")), ("right", row.get("right_censored")))
             if flag
         ]
-        return ", ".join(marks) or "none"
+        return ", ".join(marks) or en("none")
     if field == "flags":
         return ", ".join(row.get("flags") or []) or "-"
     return _flat(row.get(field, ""))
@@ -418,39 +433,42 @@ def _render_roster(roster: Mapping[str, Any]) -> str:
     total = len(rows)
     strata = [key for key in ("A", "B", "C", "D") if any(r.get("stratum") == key for r in rows)]
 
-    head = "".join(f'<th scope="col">{_esc(label)}</th>' for label, _ in _ROSTER_COLUMNS)
+    head = "".join(f'<th scope="col">{_esc(en(label))}</th>' for label, _ in _ROSTER_COLUMNS)
     body = []
     for index, row in enumerate(rows):
         cells = "".join(f"<td>{_esc(_roster_cell(row, field))}</td>" for _, field in _ROSTER_COLUMNS)
         body.append(f'<tr data-i="{index}">{cells}</tr>')
 
     options = "".join(
-        f'<option value="{_attr(value)}">{_esc(label)}</option>' for value, label in _ROSTER_ORDERS
+        f'<option value="{_attr(value)}">{_esc(en(label))}</option>' for value, label in _ROSTER_ORDERS
     )
-    strata_options = '<option value="">every position label</option>' + "".join(
-        f'<option value="{_attr(key)}">{_esc(STRATUM_LABEL[key])}</option>' for key in strata
+    strata_options = f'<option value="">{_esc(en("every position label"))}</option>' + "".join(
+        f'<option value="{_attr(key)}">{_esc(en(STRATUM_LABEL[key]))}</option>' for key in strata
     )
+    # The script rebuilds the status line on every filter change, so it reads the
+    # two sentences off the element rather than carrying its own English copy.
+    shown = en("Showing {visible} of {total} people.")
+    hidden = en(" {hidden} hidden by the filter. Every count in this report is over all {total} "
+                "and does not change.")
 
     return (
-        f'<details id="roster"><summary>Full roster table — {total} rows, '
-        "one per person, ordered by first appearance</summary>"
+        f'<details id="roster"><summary>'
+        f'{en("Full roster table — {total} rows, one per person, ordered by first appearance", total=total)}'
+        "</summary>"
         # Hidden until the script un-hides it: a filter box that does nothing
         # because JavaScript is off would be worse than no filter box.
         '<div class="roster-controls" id="roster-controls" hidden>'
-        '<p class="control"><label for="roster-q">Find a person '
-        "(name, position label, affiliation signal)</label>"
+        f'<p class="control"><label for="roster-q">'
+        f'{_esc(en("Find a person (name, position label, affiliation signal)"))}</label>'
         '<input type="search" id="roster-q" autocomplete="off"></p>'
-        '<p class="control"><label for="roster-stratum">Show position label</label>'
+        f'<p class="control"><label for="roster-stratum">{_esc(en("Show position label"))}</label>'
         f'<select id="roster-stratum">{strata_options}</select></p>'
-        '<p class="control"><label for="roster-order">Order rows by</label>'
+        f'<p class="control"><label for="roster-order">{_esc(en("Order rows by"))}</label>'
         f'<select id="roster-order">{options}</select></p>'
-        f'<p class="status" id="roster-status" role="status" aria-live="polite">'
-        f"Showing {total} of {total} people.</p>"
-        '<p class="note">Ordering by appearances, lead slots or equal-contribution flags '
-        "is not offered. Ordering people by a count is a productivity ranking, and this "
-        "report does not rank people. Filtering hides rows on screen only; the counts in "
-        "this section and every figure are over the whole roster, and printing restores "
-        "every row.</p>"
+        f'<p class="status" id="roster-status" role="status" aria-live="polite" '
+        f'data-shown="{_attr(shown)}" data-hidden="{_attr(hidden)}">'
+        f"{_esc(shown.format(visible=total, total=total))}</p>"
+        f'<p class="note">{_esc(en(_ROSTER_ORDER_NOTE))}</p>'
         "</div>"
         f'<div class="tablescroll"><table id="roster-table"><thead><tr>{head}</tr></thead>'
         f'<tbody id="roster-body">{"".join(body)}</tbody></table></div>'
@@ -502,7 +520,7 @@ def _render_section(
     roster = (report.get("metrics") or {}).get("s2") if section_id == 2 else None
     rendered_body = []
     for block in body_blocks:
-        if roster and block["kind"] == "table" and block["header"][:1] == ["person"]:
+        if roster and block["kind"] == "table" and block["header"][:1] in (["person"], [en("person")]):
             # Rendered from the metric rows instead of from the Markdown table, so
             # the sort keys are typed and the row indices line up with the
             # embedded JSON the controls read. If `_roster_body` ever renames its
@@ -512,10 +530,10 @@ def _render_section(
             continue
         rendered_body.append(_render_block(block, collapsible=not always_open))
     if section_id in COLLAPSE_WHOLE_BODY and rendered_body and not always_open:
-        count = ((report.get("metrics") or {}).get("s13") or {}).get("denominator", "all")
+        count = ((report.get("metrics") or {}).get("s13") or {}).get("denominator")
         parts.append(
-            f"<details><summary>All {count} record titles, verbatim, by year</summary>"
-            f"{''.join(rendered_body)}</details>"
+            f"<details><summary>{en('All {count} record titles, verbatim, by year', count=count) if count is not None else en('All record titles, verbatim, by year')}"
+            f"</summary>{''.join(rendered_body)}</details>"
         )
     else:
         parts += rendered_body
@@ -543,11 +561,10 @@ def _render_refusal(report: Mapping[str, Any]) -> str:
     )
     return (
         '<section class="rep" id="gate">'
-        f'<h2>Report refused — gate {_esc(gate.get("id", "?"))} '
-        f'({_esc(gate.get("name", ""))})</h2>'
-        f'<p>{_esc(gate.get("message", ""))}</p>'
-        "<h3>Observed</h3>"
-        f'<ul>{observed or "<li>(none)</li>"}</ul>'
+        f'<h2>{_esc(en("Report refused — gate {gate} ({name})", gate=gate.get("id", "?"), name=en(gate.get("name", ""))))}</h2>'
+        f'<p>{_esc(en(gate.get("message", "")))}</p>'
+        f"<h3>{_esc(en('Observed'))}</h3>"
+        f'<ul>{observed or "<li>" + _esc(en("(none)")) + "</li>"}</ul>'
         "</section>"
     )
 
@@ -557,7 +574,7 @@ def _render_nav(sections: Sequence[Mapping[str, Any]]) -> str:
         f'<li><a href="#s{int(s["id"])}">{int(s["id"])}. {_esc(s["title"])}</a></li>'
         for s in sections
     )
-    return f'<nav class="toc" aria-label="Sections"><ol>{items}</ol></nav>'
+    return f'<nav class="toc" aria-label="{_attr(en("Sections"))}"><ol>{items}</ol></nav>'
 
 
 def _json_script(report: Mapping[str, Any]) -> str:
@@ -591,16 +608,25 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
     "rows", "drawn"}` as produced by `profile.charts`. Missing or None means the
     page renders every section without figures, which is what lets this module
     ship before the chart module does.
+
+    The page is written in the report's language (`report.localize`), and the
+    charts handed in should have been drawn from the same copy: a figure drawn
+    from the English report carries English captions onto the Chinese page.
     """
-    name = str(report.get("author_name") or "").strip() or "(unnamed researcher)"
-    title = f"Observed publication pattern — {name}"
+    with using(report.get("language") or "en"):
+        return _render_html(report, charts)
+
+
+def _render_html(report: Mapping[str, Any], charts: Any) -> str:
+    name = str(report.get("author_name") or "").strip() or en("(unnamed researcher)")
+    title = en("Observed publication pattern — {name}", name=name)
     refused = bool(report.get("refused"))
     sections = list(report.get("sections") or [])
     bundle = _normalise_charts(charts)
 
     parts = [
         "<!DOCTYPE html>",
-        '<html lang="en">',
+        f'<html lang="{"zh-CN" if language() == "zh" else "en"}">',
         "<head>",
         '<meta charset="utf-8">',
         '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -608,10 +634,11 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
         f"<style>{_CSS}</style>",
         "</head>",
         "<body>",
-        '<a class="skip" href="#main">Skip to content</a>',
+        f'<a class="skip" href="#main">{_esc(en("Skip to content"))}</a>',
         '<header class="page">',
         f"<h1>{_esc(title)}</h1>",
-        f'<p class="stamp">Generated {_esc(report.get("generated_at", ""))}. '
+        '<p class="stamp">' + en(
+        "Generated {generated}. "
         "This report describes publication metadata. Section 16 states one composite score out "
         "of 100 beside every input and the full weight table that produced it, and the star band "
         "that score falls in beside the band edges that decided it — a star count is that same "
@@ -631,7 +658,8 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
         "journal predatory and no count of those signals becomes a grade. Section 20 reproduces "
         "student evaluations you collected by hand, each beside its source and the day it was "
         "read; they are printed as given and nothing is computed over them — no sentiment "
-        "analysis, no average, no rating, and no contribution to any score on this page.</p>",
+        "analysis, no average, no rating, and no contribution to any score on this page.",
+        generated=_esc(report.get("generated_at", ""))) + "</p>",
         "</header>",
     ]
 
@@ -646,11 +674,12 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
 
     parts += [
         '<section class="rep" id="data">',
-        "<h2>Report data</h2>",
-        "<p>The same numbers, embedded verbatim as JSON so they can be copied out. Every value "
-        "and every suppression decision on this page was rendered in Python from this record; "
-        "the block below is not the render source for any of them. The roster controls read it "
-        "for sort keys only.</p>",
+        f"<h2>{_esc(en('Report data'))}</h2>",
+        "<p>" + _esc(en(
+            "The same numbers, embedded verbatim as JSON so they can be copied out. Every value "
+            "and every suppression decision on this page was rendered in Python from this record; "
+            "the block below is not the render source for any of them. The roster controls read it "
+            "for sort keys only.")) + "</p>",
         _json_script(report),
         "</section>",
         "</main>",
@@ -666,11 +695,16 @@ def write_html(
     output_dir: str | Path,
     charts: Any = None,
 ) -> str:
-    """Write the page beside the Markdown and JSON, using the same timestamp stem."""
+    """Write the page beside the Markdown and JSON, using the same timestamp stem.
+
+    Named for the report's language exactly as `report.write_report` names the
+    Markdown, so each language's two files share one stem.
+    """
     directory = Path(output_dir)
     directory.mkdir(parents=True, exist_ok=True)
     stamp = datetime.fromisoformat(str(report["generated_at"])).strftime("%Y%m%d_%H%M%S")
-    path = directory / f"advisor_profile_{stamp}.html"
+    suffix = report_suffix(report.get("language") or "en")
+    path = directory / f"advisor_profile_{stamp}{suffix}.html"
     path.write_text(render_html(report, charts), encoding="utf-8")
     return str(path)
 
@@ -684,7 +718,7 @@ _CSS = """
 :root{--ink:#1a1a1a;--muted:#454545;--rule:#c4c4c4;--bg:#fff;--accent:#12457f;--soft:#f2f2f2}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--ink);font-size:1rem;line-height:1.55;
- font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+ font-family:ui-sans-serif,system-ui,"Segoe UI",Roboto,Helvetica,Arial,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans CJK SC","Source Han Sans SC",sans-serif}
 .skip{position:absolute;left:-9999px;top:0}
 .skip:focus{position:static;display:inline-block;margin:.5rem;padding:.5rem;background:var(--soft)}
 header.page{padding:1.5rem 1rem .9rem;border-bottom:3px solid var(--ink)}
@@ -822,10 +856,12 @@ function apply(){
  tbody.appendChild(frag);
  if(status){
   var total=trs.length;
-  var msg="Showing "+visible+" of "+total+" people.";
+  var shown=status.getAttribute("data-shown")||"Showing {visible} of {total} people.";
+  var hidden=status.getAttribute("data-hidden")||
+   " {hidden} hidden by the filter. Every count in this report is over all {total} and does not change.";
+  var msg=shown.split("{visible}").join(visible).split("{total}").join(total);
   if(visible!==total){
-   msg+=" "+(total-visible)+" hidden by the filter. Every count in this report is over all "+
-    total+" and does not change.";
+   msg+=hidden.split("{hidden}").join(total-visible).split("{total}").join(total);
   }
   status.textContent=msg;
  }

@@ -585,7 +585,10 @@ _S18 = re.search(r'<section class="rep" id="s18".*?</section>', PAGE, re.S).grou
 check("Section 18 contains no <details>", "<details" in _S18, False)
 check_true("...and carries the 风险信号 column header", "风险信号" in _S18)
 check_true("...and says the signals were not collected, rather than leaving a blank",
-           "未采集" in _S18)
+           "not collected" in _S18)
+_S18_ZH = re.search(r'<section class="rep" id="s18".*?</section>',
+                    render_html(report.localize(make_report(), "zh"), CHARTS), re.S).group(0)
+check_true("...which the Chinese page says as 未采集", "未采集" in _S18_ZH)
 check_true("...and names the verb that collects them",
            "check-your-advisor journal-risk" in _S18)
 check_true("...and refuses the word the whole block exists not to print",

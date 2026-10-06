@@ -182,8 +182,12 @@ def run_profile(directory: str, data: dict) -> tuple[int, dict[str, str]]:
         handler.close()
     logging.getLogger("check_your_advisor").handlers.clear()
     produced = sorted(os.listdir(directory))
-    by_suffix = {suffix: [name for name in produced if name.endswith(suffix)]
+    # The English report keeps the file names every earlier release wrote, so the
+    # checks below that count files count those; the Chinese pair is listed apart.
+    english = [name for name in produced if ".zh-CN." not in name]
+    by_suffix = {suffix: [name for name in english if name.endswith(suffix)]
                  for suffix in (".html", ".md", ".json", ".png", ".csv")}
+    by_suffix["zh-CN"] = [name for name in produced if ".zh-CN." in name]
     return code, by_suffix
 
 
@@ -213,6 +217,19 @@ with tempfile.TemporaryDirectory() as tmp:
     stems = {name.rsplit(".", 1)[0] for name in files[".html"] + files[".md"]
              if name.startswith("advisor_profile_")}
     check("all three share one timestamped stem", len(stems), 1)
+
+    # The Chinese report: one HTML and one Markdown under the same stem, and no
+    # second JSON — the record holds numbers, which have no language.
+    stem = next(iter(stems))
+    check("the Chinese report is written beside it, HTML and Markdown",
+          files["zh-CN"], [f"{stem}.zh-CN.html", f"{stem}.zh-CN.md"])
+    check("...and the JSON is written once",
+          [name for name in files[".json"] if name.startswith("advisor_profile_")], [f"{stem}.json"])
+    page_zh = read(tmp, f"{stem}.zh-CN.html")
+    check_true("...as a Chinese page", '<html lang="zh-CN">' in page_zh)
+    check_true("...that is not the English page", page_zh != read(tmp, f"{stem}.html"))
+    check("...with every figure the English page has", page_zh.count("<figure "),
+          read(tmp, f"{stem}.html").count("<figure "))
 
     # Acceptance item 1. The defect was a raster, so the assertion is that no
     # raster exists — not that a particular filename is absent.
@@ -936,8 +953,11 @@ with tempfile.TemporaryDirectory() as tmp:
     check("verified above fetched raises nothing out of main()", raised, "")
     check("...and reports it through the exit code", code, 1)
     produced = sorted(os.listdir(tmp))
-    refusal_html = [name for name in produced if name.endswith(".html")]
+    refusal_html = [name for name in produced if name.endswith(".html") and ".zh-CN." not in name]
     check("...having written the refusal page", len(refusal_html), 1)
+    check("...and its Chinese copy beside it",
+          [name for name in produced if name.endswith(".zh-CN.html")],
+          [refusal_html[0].replace(".html", ".zh-CN.html")])
     refusal = read(tmp, refusal_html[0])
     check_true("...which names the gate", "G6" in refusal)
     check_true("...prints both observed operands",
@@ -998,7 +1018,8 @@ check("...and carries no gate", _page["gate"], None)
 check("...but does name the warning", [w["id"] for w in _page["warnings"]], ["G3"])
 check("...and the report's own exit code agrees with the shell's",
       _page["exit_code"], _run.returncode)
-_md = sorted(_root.glob("advisor_profile_*.md"))[-1].read_text(encoding="utf-8")
+_md = sorted(path for path in _root.glob("advisor_profile_*.md")
+             if ".zh-CN." not in path.name)[-1].read_text(encoding="utf-8")
 check_true("...over a report that was actually written out in full",
            any(line.startswith("## 14.") and "What was deliberately not computed" in line
                for line in _md.splitlines()))

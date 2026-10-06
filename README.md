@@ -22,7 +22,8 @@ python scripts/run.py cite    --output-dir ./record
 python scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
 ```
 
-Three commands, one HTML report. Nothing to install: the standard library only.
+Three commands, one HTML report — written twice, in English and in Chinese, with the same
+numbers on both. Nothing to install: the standard library only.
 
 ## What it answers
 
@@ -335,7 +336,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-4963 assertions across 35 files with PyMuPDF installed, 4960 without it,
+5110 assertions across 36 files with PyMuPDF installed, 5107 without it,
 measured 2026-10-06 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The
@@ -347,8 +348,16 @@ differently without them, and all three are the cases that need a real PDF file.
 
 ## Known limitations
 
-- The report is in English; the command-line logs are in Chinese. Not a decision
-  anyone would defend — it is where the tool grew up, and unifying it is open.
+- ~~The report is in English; the command-line logs are in Chinese.~~
+  **Resolved.** Every report now comes in both languages, each in one language
+  throughout: `profile` writes `advisor_profile_<timestamp>.html` / `.md` in English
+  and `advisor_profile_<timestamp>.zh-CN.html` / `.zh-CN.md` in Chinese, from the
+  same built report, so the two pages cannot disagree about a number; `compare`
+  writes `advisor_compare_<timestamp>.md` and `.zh-CN.md`. The JSON record is
+  written once. The command line — logs, `--help`, errors — follows `--lang zh|en`,
+  then `$CHECK_YOUR_ADVISOR_LANG`, then the system locale, and is English on any
+  locale that is not Chinese. Chinese CSV column names (`版本来源`, `数据获取日期`, …)
+  stay as they are in both languages, because they are what your file contains.
 - ~~`cite` has no cache of its own.~~ **Resolved.** `cite` and `journal-risk`
   now cache what each API answered, keyed on which API was asked and what it was
   asked about, in a second table beside the PDF cache in the same SQLite file.

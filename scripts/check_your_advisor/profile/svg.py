@@ -21,6 +21,8 @@ grade — which this product does not emit at any sample size.
 
 from __future__ import annotations
 
+import re
+import unicodedata
 from collections import Counter
 from typing import Any
 
@@ -94,6 +96,26 @@ def fmt(value: float | None) -> str:
     return str(int(value)) if float(value).is_integer() else f"{float(value):.1f}"
 
 
+def cells(content: str) -> int:
+    """Width in Latin-letter cells: a Chinese character or full-width mark takes two.
+
+    Every width in this module is an estimate from character counts, so that a figure
+    never depends on the font metrics of whatever renders it. Counting a Chinese
+    character as one Latin letter wraps a Chinese caption at twice its budget.
+    """
+    return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in content)
+
+
+# A Chinese line may break between any two characters, so each wide character is a
+# token of its own; a run of anything else is one word, as before. The leading
+# whitespace is kept with the token, which is how a break knows whether the source
+# put a space there.
+_TOKEN = re.compile(r"\s*(?:[\u2e80-\u9fff\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]"
+                    r"|[^\s\u2e80-\u9fff\uf900-\ufaff\ufe30-\ufe4f\uff00-\uffef]+)")
+# Punctuation a Chinese line may not start with; it stays on the line it closes.
+_NO_LINE_START = frozenset("，。、；：！？）》」』〉】…％")
+
+
 def wrap(content: str, width: int, max_lines: int) -> list[str]:
     """Greedy wrap whose last line absorbs the overflow instead of adding another.
 
@@ -102,9 +124,11 @@ def wrap(content: str, width: int, max_lines: int) -> list[str]:
     """
     lines: list[str] = []
     current = ""
-    for word in content.split():
-        candidate = f"{current} {word}".strip()
-        if current and len(candidate) > width and len(lines) < max_lines - 1:
+    for match in _TOKEN.finditer(content):
+        word = match.group().lstrip()
+        candidate = f"{current} {word}" if current and word != match.group() else current + word
+        if (current and cells(candidate) > width and len(lines) < max_lines - 1
+                and word[0] not in _NO_LINE_START):
             lines.append(current)
             current = word
         else:
@@ -175,7 +199,7 @@ def plate(x: float, y: float, content: str) -> str:
     """The visible replacement for a suppressed aggregate, drawn where the aggregate
     would have been: an absence there reads as zero or as a broken chart. It carries the
     n and the floor, so nobody has to look outside the figure to learn why."""
-    return rect(x, y, len(content) * 5.5 + 16, 18.0, fill=PLATE_FILL, stroke=MUTED,
+    return rect(x, y, cells(content) * 5.5 + 16, 18.0, fill=PLATE_FILL, stroke=MUTED,
                 **{"stroke-width": 1, "stroke-dasharray": "3 2", "class": "suppression-plate"}) \
         + text(x + 8, y + 12.5, content, 10.0)
 
@@ -243,7 +267,7 @@ def legend(x: float, y: float, entries: list[tuple[str, str]], size: float = 9.0
     parts, cursor = [], x
     for kind, label in entries:
         parts += [glyph(kind, cursor + 6, y - 3), text(cursor + 16, y, label, size, fill=MUTED)]
-        cursor += 16 + len(label) * size * 0.52 + 18
+        cursor += 16 + cells(label) * size * 0.52 + 18
     return "".join(parts)
 
 

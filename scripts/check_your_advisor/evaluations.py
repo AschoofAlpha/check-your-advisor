@@ -62,6 +62,7 @@ from typing import Any
 # one definition of what "written in Chinese characters" means; a second copy of
 # that range is how two modules disagree about one name without anyone noticing.
 # `theses` imports nothing from `profile` at module level, so this adds no cycle.
+from .i18n import lazy_en, lazy_join, lazy_zh, zh
 from .theses import name_script
 
 logger = logging.getLogger(__name__)
@@ -356,8 +357,8 @@ def _decode(path: str | Path) -> tuple[str, str]:
         except UnicodeDecodeError:
             continue
     raise EvaluationTableError(
-        f"学生评价表无法解码: {path}（已尝试 {', '.join(_ENCODINGS)}）。"
-        "请在 Excel 里另存为 UTF-8 CSV 后重试。"
+        lazy_zh("学生评价表无法解码: {path}（已尝试 {encodings}）。请在 Excel 里另存为 UTF-8 CSV 后重试。",
+                path=path, encodings=', '.join(_ENCODINGS))
     )
 
 
@@ -379,8 +380,8 @@ def _header_map(header: Sequence[str], path: str | Path) -> tuple[dict[int, str]
             continue
         if key in seen:
             raise EvaluationTableError(
-                f"学生评价表表头有两列都对应字段 {key}: 第 {seen[key] + 1} 列与第 {position + 1} 列"
-                f"（{path}）。请删掉其中一列后重试。"
+                lazy_zh("学生评价表表头有两列都对应字段 {key}: 第 {value} 列与第 {value_2} 列（{path}）。请删掉其中一列后重试。",
+                        key=key, value=seen[key] + 1, value_2=position + 1, path=path)
             )
         seen[key] = position
         mapping[position] = key
@@ -388,23 +389,24 @@ def _header_map(header: Sequence[str], path: str | Path) -> tuple[dict[int, str]
     found = ", ".join(_clean(cell) for cell in header if _clean(cell)) or "(none)"
     missing = [k for k in REQUIRED_FIELDS if k not in seen]
     if missing:
-        wanted = "、".join(f"{_BY_KEY[k].zh}（或 {_BY_KEY[k].en}）" for k in missing)
+        wanted = lazy_join([lazy_zh("{zh}（或 {en}）", zh=_BY_KEY[k].zh, en=_BY_KEY[k].en) for k in missing], lazy_zh("、"))
         why = ""
         if {"source", "retrieved_on"} & set(missing):
-            why = (
+            why = lazy_zh(
                 "缺评价来源或数据获取日期时，表里的每句话过后都无法追溯是谁在哪一天说的、"
                 "从哪一页抄来的，因此不接受这张表——这与期刊表缺版本来源是同一条规矩。"
             )
         raise EvaluationTableError(
-            f"学生评价表缺少必需列: {wanted}（{path}）。{why}表头读到的列: {found}。"
+            lazy_zh("学生评价表缺少必需列: {wanted}（{path}）。{why}表头读到的列: {found}。",
+                    wanted=wanted, path=path, why=why, found=found)
         )
     if not any(k in seen for k in REQUIRED_EITHER):
-        raise EvaluationTableError(
-            "学生评价表缺少必需列: "
-            + "、".join(f"{_BY_KEY[k].zh}（或 {_BY_KEY[k].en}）" for k in REQUIRED_EITHER)
-            + f"——两列至少要有一列（{path}）。两列都没有时，这张表只有出处没有内容，"
-            f"没有任何一句评价可以印出来。表头读到的列: {found}。"
-        )
+        raise EvaluationTableError(lazy_zh(
+            "学生评价表缺少必需列: {wanted}——两列至少要有一列（{path}）。两列都没有时，"
+            "这张表只有出处没有内容，没有任何一句评价可以印出来。表头读到的列: {found}。",
+            wanted=lazy_join([lazy_zh("{zh}（或 {en}）", zh=_BY_KEY[k].zh, en=_BY_KEY[k].en) for k in REQUIRED_EITHER], lazy_zh("、")),
+            path=path, found=found,
+        ))
     return mapping, unknown
 
 
@@ -497,7 +499,8 @@ def load_evaluation_table(path: str | Path) -> dict[str, Any]:
     try:
         header = next(reader)
     except StopIteration:
-        raise EvaluationTableError(f"学生评价表是空文件: {path}") from None
+        raise EvaluationTableError(lazy_zh("学生评价表是空文件: {path}",
+                                           path=path)) from None
 
     mapping, unknown_columns = _header_map(header, path)
     columns_used = {key: _clean(header[position]) for position, key in mapping.items()}
@@ -538,7 +541,7 @@ def load_evaluation_table(path: str | Path) -> dict[str, Any]:
     for flag, count in sorted(Counter(f for row in rows for f in row["flags"]).items()):
         logger.warning("  %d 行带标记 %s（已保留，未丢弃）", count, flag)
     if unknown_columns:
-        logger.info("学生评价表有本工具不认识的列，已忽略: %s", "、".join(unknown_columns))
+        logger.info("学生评价表有本工具不认识的列，已忽略: %s", zh("、").join(unknown_columns))
 
     return {
         "path": str(path),
@@ -633,23 +636,26 @@ def _select_advisor_rows(
         return matched, "matched", None
     if not rows:
         return [], "refused", (
-            "the evaluation table is empty, so there is no statement to attribute to anyone."
+            lazy_en("the evaluation table is empty, so there is no statement to attribute to anyone.")
         )
     distinct = {str(row.get("advisor") or "").strip() for row in rows
                 if str(row.get("advisor") or "").strip()}
     if len(distinct) == 1:
         only = next(iter(distinct))
         return list(rows), "unverified_single_advisor", (
-            f"no 导师姓名 cell joined to pi_name {pi_name!r}, but the file carries exactly one "
-            f"advisor ({only!r}), so every row was taken as theirs. If that file was collected "
-            "for someone else, every statement below is about that other person."
+            lazy_en("no 导师姓名 cell joined to pi_name {pi_name!r}, but the file carries exactly "
+                    "one advisor ({only!r}), so every row was taken as theirs. If that file "
+                    "was collected for someone else, every statement below is about that other "
+                    "person.",
+                    pi_name=pi_name, only=only)
         )
     return [], "refused", (
-        f"no 导师姓名 cell joined to pi_name {pi_name!r} and the file carries {len(distinct)} "
-        f"different advisors, so there is no non-arbitrary way to say which statements are this "
-        f"PI's. Advisors seen: {', '.join(sorted(distinct)[:12])}"
-        + (" ..." if len(distinct) > 12 else "")
-        + ". Fix pi_name, or add a 导师姓名拼音 column."
+        lazy_en("no 导师姓名 cell joined to pi_name {pi_name!r} and the file carries "
+                "{n_distinct} different advisors, so there is no non-arbitrary way to say "
+                "which statements are this PI's. Advisors seen: {distinct}. Fix pi_name, or "
+                "add a 导师姓名拼音 column.",
+                pi_name=pi_name, n_distinct=len(distinct),
+                distinct=', '.join(sorted(distinct)[:12]) + (" ..." if len(distinct) > 12 else ""))
     )
 
 
@@ -711,15 +717,15 @@ def join_evaluations(table: Any, pi_name: str) -> dict[str, Any]:
 
     reasons: list[str] = []
     if advisor_filter == "refused":
-        reasons.append(advisor_note or "no row could be attributed to this PI")
+        reasons.append(advisor_note or lazy_en("no row could be attributed to this PI"))
     elif not entries:
         reasons.append(
-            "the file loaded and carries no usable row for this PI, so there is nothing to print"
+            lazy_en("the file loaded and carries no usable row for this PI, so there is nothing to print")
         )
     if entries and not dates:
         reasons.append(
-            "no row carries a parseable 数据获取日期, so none of these statements can be tied to a "
-            "day the page was read"
+            lazy_en("no row carries a parseable 数据获取日期, so none of these statements can be tied to a "
+                    "day the page was read")
         )
 
     provenance = table if isinstance(table, Mapping) else {}

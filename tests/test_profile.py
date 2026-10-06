@@ -295,25 +295,32 @@ check("T02 an empty list is shown as a count, not as an empty bracket",
       "affiliation_keywords=0" in report._warning("G3", {"affiliation_keywords": []})["observed_text"],
       True)
 _md = report.render_markdown(rep)
-# Headings became bilingual in round four (`report.SECTION_TITLES_ZH`), so these
-# match on the two things actually under test — which section, and that the
-# warning is the very next thing inside it — rather than on one exact heading
-# string. The English half is asserted separately, because four other modules and
-# SKILL.md cross-reference sections by it and would break silently without it.
+_md_zh = report.render_markdown(report.localize(rep, "zh"))
+# Each report is in one language: the English page carries the English title
+# alone, which four other modules and SKILL.md cross-reference sections by, and
+# the Chinese page carries `report.SECTION_TITLES_ZH`. These match on the two
+# things actually under test — which section, and that the warning is the very
+# next thing inside it — rather than on one exact heading string.
 _head_0 = next(line for line in _md.splitlines() if line.startswith("## 0."))
 _head_19 = next(line for line in _md.splitlines() if line.startswith("## 19."))
-check_true("T02 section 0's heading carries both languages",
-           "What this report is and is not" in _head_0 and "这份报告" in _head_0)
+check("T02 section 0's heading is the English title on the English page",
+      _head_0, "## 0. What this report is and is not")
+check("T02 ...and the Chinese title on the Chinese page",
+      next(line for line in _md_zh.splitlines() if line.startswith("## 0.")),
+      "## 0. " + report.SECTION_TITLES_ZH[0])
 # The promise `SECTION_TITLES_ZH`'s docstring makes. Without this, adding a
-# section gives it an English-only heading and nothing says so — the reader just
-# finds one row of the table of contents in the wrong language.
+# section gives the Chinese page an English heading and nothing says so — the
+# reader just finds one row of the table of contents in the wrong language.
 check("T02b every section emitted has a Chinese title",
       sorted(s["id"] for s in rep["sections"] if s["id"] not in report.SECTION_TITLES_ZH), [])
 check("T02b ...and the table names no section that is not emitted",
       sorted(set(report.SECTION_TITLES_ZH) - {s["id"] for s in rep["sections"]}), [])
-check("T02b every rendered heading carries both languages",
+check("T02b no heading on the English page carries Chinese",
       [line for line in _md.splitlines()
-       if line.startswith("## ") and not any("一" <= c <= "鿿" for c in line)], [])
+       if line.startswith("## ") and any("一" <= c <= "鿿" for c in line)], [])
+check("T02b every heading on the Chinese page is its Chinese title",
+      [line for line in _md_zh.splitlines() if line.startswith("## ")
+       and line.split(". ", 1)[1] not in report.SECTION_TITLES_ZH.values()], [])
 check_true("T02 the markdown prints it directly under the section heading",
            f"{_head_0}\n\n**Warning G2" in _md)
 check_true("T02 and again above Section 19's own prose",
@@ -2371,6 +2378,14 @@ _RISK_CORPUS = [
 _no_risk = build(_RISK_CORPUS)
 _s18 = body_text(_no_risk, 18)
 
+
+def zh_body_text(rep, section_id):
+    """The same section on the Chinese page, which `report.localize` writes."""
+    return "\n".join(next(s for s in report.localize(rep, "zh")["sections"]
+                          if s["id"] == section_id)["body"])
+
+
+
 check_true("T61 the risk join is a top-level key, like journals beside it",
            isinstance(_no_risk["journal_risk"], dict))
 check("T61 ...and never appears inside metrics",
@@ -2379,8 +2394,9 @@ check_true("T61 no collected file means risk_missing, not an empty result",
            _no_risk["journal_risk"]["risk_missing"])
 check_true("T61 the note names the verb that produces the file",
            "check-your-advisor journal-risk" in _no_risk["journal_risk_note"])
-check_true("T61 the section prints 未采集 rather than a blank column",
-           "未采集" in _s18)
+check_true("T61 the section prints 'not collected' rather than a blank column",
+           "not collected" in _s18)
+check_true("T61 ...and 未采集 on the Chinese page", "未采集" in zh_body_text(_no_risk, 18))
 check_true("T61 ...and prints the reason under a 'Reason:' line",
            f"Reason: {_no_risk['journal_risk_note']}" in _s18)
 check_true("T61 ...and says an empty cell is a lookup nobody ran",
@@ -2416,10 +2432,14 @@ _rows = [line for line in _s18_body if line.startswith("| Journal of Hepatology"
 check("T61 the matched journal emitted a row", len(_rows), 1)
 check("T61 ...whose column count matches the header",
       sorted({line.count("|") for line in _rows}), [_header.count("|")])
-check_true("T61 with no signals collected the cell reads 未采集, not blank",
-           _rows[0].rstrip().endswith("| 未采集 |"))
+check_true("T61 with no signals collected the cell reads 'not collected', not blank",
+           _rows[0].rstrip().endswith("| not collected |"))
 check_true("T61 ...and the hand-filled 预警 cell beside it is untouched",
-           "| 否 | 未采集 |" in _rows[0])
+           "| no | not collected |" in _rows[0])
+_rows_zh = [line for line in zh_body_text(_tabled, 18).splitlines()
+            if line.startswith("| Journal of Hepatology")]
+check_true("T61 ...and the Chinese page says both in Chinese, in the same two cells",
+           _rows_zh and "| 否 | 未采集 |" in _rows_zh[0])
 # The other two row emitters: a journal the table does not hold, and a corpus in
 # which no record carries a journal string at all.
 _unlisted = report.build_report(
@@ -2475,7 +2495,8 @@ check_false("T61 a supplied payload is not missing", _risked["journal_risk"]["ri
 check("T61 the note is blank when a payload was supplied", _risked["journal_risk_note"], "")
 check("T61 the journal was matched by ISSN", _risked["journal_risk"]["journals_checked"], 1)
 check_true("T61 the table cell carries the count and points at the block below",
-           "| 2 项（见下） |" in _s18r)
+           "| 2 signal(s), see below |" in _s18r)
+check_true("T61 ...in Chinese on the Chinese page", "| 2 项（见下） |" in zh_body_text(_risked, 18))
 check_true("T61 each statement is printed with the endpoint family that returned it",
            "| doaj_not_indexed | doaj |" in _s18r)
 check_true("T61 ...and the day it was read", "2026-08-22T09:00:00" in _s18r)
@@ -2526,7 +2547,8 @@ _mixed = report.build_report(
     {}, None, FIXED_NOW, journal_table=_TABLE, journal_risk=_RISK_PAYLOAD)
 _s18m = body_text(_mixed, 18)
 check_true("T61 a journal the corpus recorded with no ISSN says exactly that",
-           "| 无 ISSN，查不了 |" in _s18m)
+           "| no ISSN, cannot be looked up |" in _s18m)
+check_true("T61 ...and so does the Chinese page", "| 无 ISSN，查不了 |" in zh_body_text(_mixed, 18))
 check_true("T61 ...and is named in the block rather than only counted",
            "Nanhai Reports" in _s18m)
 check("T61 ...and is not counted as checked", _mixed["journal_risk"]["journals_checked"], 1)
