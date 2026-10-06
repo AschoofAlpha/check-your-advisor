@@ -22,6 +22,7 @@ Subcommands
   clean-cache       Drop stale failure records from the SQLite cache
 
 Run without a subcommand to get `fetch` (kept for backwards compatibility).
+`--version` (or `-V`) in place of a subcommand prints the version and exits.
 
 What the report will now turn a number into, and what it still will not:
 
@@ -62,6 +63,7 @@ from datetime import datetime
 from collections.abc import Mapping
 from typing import Any
 
+from check_your_advisor import __version__
 from check_your_advisor.config import DEFAULT_CONFIG, load_config
 
 
@@ -575,7 +577,14 @@ def _force_utf8_stdio() -> None:
 
 def main(argv: list[str] | None = None):
     _force_utf8_stdio()
-    cmd, rest = _split_subcommand(argv)
+    args = sys.argv[1:] if argv is None else list(argv)
+    # Ahead of the subcommand split, because with no subcommand every argument
+    # goes to the `fetch` parser, which answered `--version` with a usage error
+    # and exit 2 — so nothing installed could say which release it was.
+    if args[:1] in (["--version"], ["-V"]):
+        print(f"check-your-advisor {__version__}")
+        return 0
+    cmd, rest = _split_subcommand(args)
     if cmd == "profile":
         return cmd_profile(rest)
     if cmd == "cite":
