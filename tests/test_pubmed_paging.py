@@ -53,12 +53,11 @@ def check_true(label: str, cond) -> None:
 
 
 def near(wait: float, interval: float) -> bool:
-    """One recorded wait, allowing for the elapsed time the throttle subtracts.
+    """One recorded wait, against the interval it should equal.
 
     The upper bound is not `interval`: the wait is computed as
-    `last + interval - now`, and that subtraction loses enough precision on a
-    monotonic clock reading tens of thousands of seconds to land a few
-    nanoseconds above the interval it was built from.
+    `last + interval - now`, and that subtraction can land a few nanoseconds
+    above the interval it was built from.
     """
     return interval - 0.02 <= wait <= interval + 1e-3
 
@@ -66,8 +65,31 @@ def near(wait: float, interval: float) -> bool:
 # Never sleep for real: the throttle waits 0.34s before every anonymous request,
 # so a 20-page harvest would take seven seconds of wall clock to prove nothing.
 # The waits are recorded instead and asserted on directly.
+#
+# Nor read the real clock. The throttle computes each wait as
+# `last + interval - now`, so on the real monotonic clock every millisecond spent
+# between two requests came off the recorded wait: parsing a 50-record efetch
+# batch takes several, and on a loaded machine the gap passed the 0.02s `near`
+# allows (6 failures in 40 runs beside eight busy processes). This clock moves
+# only when the throttle sleeps, so each wait is exactly what the throttle chose.
 _slept: list[float] = []
-pubmed_api.time.sleep = lambda seconds: _slept.append(seconds)
+
+
+class _Clock:
+    """`pubmed_api`'s `time`: `monotonic` advances only by what `sleep` was asked for."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        _slept.append(seconds)
+        self.now += seconds
+
+
+pubmed_api.time = _Clock()
 
 
 class FakeBody:
