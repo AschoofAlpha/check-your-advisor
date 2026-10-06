@@ -63,6 +63,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
+from ..i18n import lazy_en
 from .metrics import MIN_N_AGGREGATE, median
 
 __all__ = [
@@ -207,12 +208,13 @@ def _lead_slot_share(source: Mapping[str, Any]) -> dict[str, Any]:
     """
     denominator = int(source.get("denominator") or 0)
     if source.get("not_computable") or denominator <= 0:
-        return {"unavailable": "no paper has a lead slot that is neither collective nor the PI's own"}
+        return {"unavailable": lazy_en("no paper has a lead slot that is neither collective nor the PI's own")}
     if source.get("suppressed"):
         return {
             "unavailable": (
-                f"metrics.first_author_slots suppressed its aggregate at {denominator} eligible "
-                f"papers (floor {MIN_N_AGGREGATE})"
+                lazy_en("metrics.first_author_slots suppressed its aggregate at {denominator} "
+                        "eligible papers (floor {min_n_aggregate})",
+                        denominator=denominator, min_n_aggregate=MIN_N_AGGREGATE)
             )
         }
     counts = source.get("counts") or {}
@@ -256,15 +258,17 @@ def _people_with_lead_slot(source: Mapping[str, Any]) -> dict[str, Any]:
     if denominator <= 0:
         return {
             "unavailable": (
-                f"every one of the {too_recent} people in the cohort is still inside the "
-                "publication lag, so there is nobody to compute this over"
+                lazy_en("every one of the {too_recent} people in the cohort is still inside the "
+                        "publication lag, so there is nobody to compute this over",
+                        too_recent=too_recent)
             )
         }
     if denominator < MIN_N_AGGREGATE:
         return {
             "unavailable": (
-                f"only {denominator} people are outside the publication lag (floor "
-                f"{MIN_N_AGGREGATE})"
+                lazy_en("only {denominator} people are outside the publication lag (floor "
+                        "{min_n_aggregate})",
+                        denominator=denominator, min_n_aggregate=MIN_N_AGGREGATE)
             )
         }
     share = holds / denominator
@@ -295,13 +299,14 @@ def _time_to_lead(source: Mapping[str, Any]) -> dict[str, Any]:
     computed over the two people who made it is not a fast lab.
     """
     if source.get("not_computable"):
-        return {"unavailable": "nobody in the corpus has reached a lead slot"}
+        return {"unavailable": lazy_en("nobody in the corpus has reached a lead slot")}
     value = source.get("median")
     if source.get("suppressed") or value is None:
         return {
             "unavailable": (
-                f"metrics.time_to_lead suppressed its median at "
-                f"{int(source.get('denominator') or 0)} people (floor {MIN_N_AGGREGATE})"
+                lazy_en("metrics.time_to_lead suppressed its median at {denominator} people (floor "
+                        "{min_n_aggregate})",
+                        denominator=int(source.get('denominator') or 0), min_n_aggregate=MIN_N_AGGREGATE)
             )
         }
     value = float(value)
@@ -341,14 +346,15 @@ def _records_per_year(source: Mapping[str, Any]) -> dict[str, Any]:
     if len(usable) < MIN_SCORED_YEARS:
         return {
             "unavailable": (
-                f"only {len(usable)} fully observed years after partial and indexing-lag bins "
-                f"are dropped (floor {MIN_SCORED_YEARS}); widen years_back"
+                lazy_en("only {n_usable} fully observed years after partial and indexing-lag bins "
+                        "are dropped (floor {min_scored_years}); widen years_back",
+                        n_usable=len(usable), min_scored_years=MIN_SCORED_YEARS)
             )
         }
     counts = [int(year.get("count") or 0) for year in usable]
     value = median(counts)
     if value is None:
-        return {"unavailable": "no fully observed year carried a record count"}
+        return {"unavailable": lazy_en("no fully observed year carried a record count")}
     return {
         "raw": value,
         "normalised": _clamp01(value / RECORDS_PER_YEAR_ANCHOR),
@@ -368,21 +374,25 @@ def _citation_gate(source: Mapping[str, Any]) -> str | None:
     denominator = int(source.get("denominator") or 0)
     covered = int(source.get("covered") or 0)
     if denominator <= 0:
-        return "the citation record carries no papers"
+        return lazy_en("the citation record carries no papers")
     if covered <= 0:
         return (
-            f"no citation count was retrieved for any of the {denominator} papers, which is a "
-            "statement about the lookup, not about the papers"
+            lazy_en("no citation count was retrieved for any of the {denominator} papers, "
+                    "which is a statement about the lookup, not about the papers",
+                    denominator=denominator)
         )
     if source.get("suppressed"):
         return (
-            f"impact.citation_metrics suppressed its aggregates at {covered} covered papers"
+            lazy_en("impact.citation_metrics suppressed its aggregates at {covered} covered "
+                    "papers",
+                    covered=covered)
         )
     if covered / denominator < MIN_CITATION_COVERAGE:
         return (
-            f"citation data covers {covered} of {denominator} papers, below the "
-            f"{MIN_CITATION_COVERAGE:.0%} floor; below it the metric is a lower bound rather "
-            "than an estimate"
+            lazy_en("citation data covers {covered} of {denominator} papers, below the "
+                    "{min_citation_coverage:.0%} floor; below it the metric is a lower bound "
+                    "rather than an estimate",
+                    covered=covered, denominator=denominator, min_citation_coverage=MIN_CITATION_COVERAGE)
         )
     return None
 
@@ -414,7 +424,7 @@ def _citation_h_index(source: Mapping[str, Any]) -> dict[str, Any]:
         return {"unavailable": reason}
     value = source.get("h_index")
     if value is None:
-        return {"unavailable": "impact.citation_metrics returned no h_index"}
+        return {"unavailable": lazy_en("impact.citation_metrics returned no h_index")}
     value = float(value)
     return {
         "raw": value,
@@ -458,7 +468,7 @@ def _citation_median(source: Mapping[str, Any]) -> dict[str, Any]:
         return {"unavailable": reason}
     value = source.get("median_citations")
     if value is None:
-        return {"unavailable": "impact.citation_metrics returned no median_citations"}
+        return {"unavailable": lazy_en("impact.citation_metrics returned no median_citations")}
     value = float(value)
     return {
         "raw": value,
@@ -717,7 +727,7 @@ def composite_score(
         if found is None:
             unavailable.append(component.name)
             reasons[component.name] = (
-                f"the bundle carries none of: {', '.join(component.sources)}"
+                lazy_en("the bundle carries none of: {sources}", sources=', '.join(component.sources))
             )
             continue
         key, source = found

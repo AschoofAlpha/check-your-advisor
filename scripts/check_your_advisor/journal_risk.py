@@ -90,6 +90,7 @@ from typing import Any
 from urllib.parse import quote, quote_plus
 
 from .http_client import RobustHTTPClient, Response, polite_headers
+from .i18n import Text, en, language, lazy_en, lazy_zh
 from .journals import normalise_issn
 
 logger = logging.getLogger("check_your_advisor.journal_risk")
@@ -103,6 +104,7 @@ __all__ = [
     "SOURCE_OPENALEX",
     "SOURCE_ORDER",
     "TRACKED_COVERAGE_FIELDS",
+    "describe_signal",
     "fetch_crossref_journal",
     "fetch_doaj_journal",
     "fetch_journal_risk",
@@ -213,13 +215,126 @@ def _json_body(resp: Response | None, source: str) -> dict[str, Any] | None:
     return data
 
 
-def _signal(name: str, source: str, endpoint: str, statement: str, **observed: Any) -> dict[str, Any]:
+def _statement(name: str, observed: Mapping[str, Any]) -> Text | None:
+    """The sentence for one signal, built from the values it was read off.
+
+    One function for both moments a sentence is needed: when the signal is
+    collected, and when a report prints it in another language from a
+    `journal_risk_*.json` that holds only the finished English. Because the
+    second rebuilds from `observed` alone, every value a sentence names is in
+    `observed` — which was already the rule, so a reader can check the sentence
+    against the numbers. None for a signal name this module never wrote.
+    """
+    o = observed
+    if name == SIGNAL_DOAJ_NOT_INDEXED:
+        return lazy_en(
+            "未被 DOAJ 收录 — this ISSN is not in the Directory of Open Access Journals. DOAJ "
+            "indexes open-access journals only, so a subscription journal is absent by "
+            "construction and this is not a finding about it.")
+    if name == SIGNAL_DOAJ_INDEXED:
+        return lazy_en(
+            "已被 DOAJ 收录 — this ISSN is in the Directory of Open Access Journals. DOAJ applies "
+            "entry criteria and does not audit a journal afterwards, so this is a membership fact "
+            "and not a quality certificate.")
+    if name == SIGNAL_DOAJ_DISCONTINUED:
+        return lazy_en("DOAJ records this journal as discontinued on {date}.",
+                       date=o.get("discontinued_date", "?"))
+    if name == SIGNAL_DOAJ_APC:
+        if not o.get("has_apc"):
+            return lazy_en("DOAJ records no article processing charge for this journal.")
+        return lazy_en(
+            "DOAJ records an article processing charge: {amounts}. An APC is how open access is "
+            "normally funded and is not on its own a warning sign.",
+            amounts=", ".join(str(item) for item in o.get("amounts") or [])
+            or lazy_en("amount not stated"))
+    if name == SIGNAL_DOAJ_REVIEW:
+        return lazy_en("DOAJ records the peer review process the publisher declared: {stated}. "
+                       "Declared, not verified.", stated=o.get("review_process", "?"))
+    if name == SIGNAL_CROSSREF_UNKNOWN:
+        return lazy_en(
+            "Crossref 无此刊记录 — Crossref returned no journal record for this ISSN. A journal "
+            "with no Crossref record deposits its DOIs elsewhere or has none; this is not a "
+            "statement about the journal's standing.")
+    if name == SIGNAL_CROSSREF_COVERAGE:
+        empty = o.get("missing_fields") or []
+        if empty:
+            return lazy_en(
+                "Crossref 元数据缺失 {missing} 项（共查 {tracked} 项）— {missing} of {tracked} "
+                "tracked Crossref metadata fields are deposited for none of this journal's "
+                "current content: {names}. This measures what the publisher deposits, not what "
+                "the journal is worth: entirely ordinary journals sit at zero on several of these.",
+                missing=o.get("missing", "?"), tracked=o.get("tracked", "?"), names=", ".join(empty))
+        return lazy_en(
+            "Crossref 元数据缺失 {missing} 项（共查 {tracked} 项）— {missing} of {tracked} tracked "
+            "Crossref metadata fields are deposited for none of this journal's current content. "
+            "This measures what the publisher deposits, not what the journal is worth: entirely "
+            "ordinary journals sit at zero on several of these.",
+            missing=o.get("missing", "?"), tracked=o.get("tracked", "?"))
+    if name == SIGNAL_CROSSREF_DOIS:
+        return lazy_en(
+            "Crossref holds {total_dois} deposited DOI(s) for this journal, published by "
+            "{publisher}.", total_dois=o.get("total_dois", "?"),
+            publisher=o.get("publisher") or lazy_en("a publisher Crossref did not name"))
+    if name == SIGNAL_OPENALEX_UNKNOWN:
+        return lazy_en("OpenAlex 无此刊记录 — OpenAlex holds no source record for this ISSN.")
+    if name == SIGNAL_OPENALEX_DOAJ:
+        lag = lazy_en(" OpenAlex's copy can lag DOAJ's own live answer, which is a separate line "
+                      "above; both are printed and neither is preferred.")
+        if not o.get("is_in_doaj"):
+            return lazy_en("OpenAlex records this journal as not in DOAJ.{lag}", lag=lag)
+        if o.get("since_year"):
+            return lazy_en("OpenAlex records this journal as in DOAJ since {since}.{lag}",
+                           since=o["since_year"], lag=lag)
+        return lazy_en("OpenAlex records this journal as in DOAJ.{lag}", lag=lag)
+    if name == SIGNAL_OPENALEX_SCOPUS:
+        scopus = o.get("is_indexed_in_scopus")
+        if scopus is True:
+            return lazy_en("OpenAlex records this journal as indexed in Scopus.")
+        if scopus is False:
+            return lazy_en("OpenAlex records this journal as not indexed in Scopus.")
+        return lazy_en(
+            "OpenAlex has no Scopus indexing value for this journal — the field is null, which is "
+            "common and is not the same as not being indexed.")
+    if name == SIGNAL_OPENALEX_APC:
+        return lazy_en("OpenAlex records an article processing charge of about {apc_usd} USD.",
+                       apc_usd=o.get("apc_usd", "?"))
+    if name == SIGNAL_OPENALEX_WORKS:
+        publisher = o.get("publisher") or lazy_en("a publisher OpenAlex did not name")
+        if o.get("country_code"):
+            return lazy_en("OpenAlex has indexed {works_count} work(s) from this journal, published "
+                           "by {publisher} in {country_code}.", works_count=o.get("works_count", "?"),
+                           publisher=publisher, country_code=o["country_code"])
+        return lazy_en("OpenAlex has indexed {works_count} work(s) from this journal, published by "
+                       "{publisher}.", works_count=o.get("works_count", "?"), publisher=publisher)
+    return None
+
+
+def describe_signal(signal: Mapping[str, Any]) -> str:
+    """One signal's statement, in the language being written.
+
+    The English page prints the statement exactly as the file recorded it,
+    because that is what the endpoint was taken to say on the day. Any other
+    language rebuilds the sentence from `observed` with `_statement`, since a
+    `journal_risk_*.json` written by an earlier run holds finished English and
+    no template; a signal name this module does not know keeps its recorded
+    wording rather than being guessed at.
+    """
+    statement = signal.get("statement") or ""
+    if isinstance(statement, Text) or language() in (None, "en"):
+        return en(statement)
+    observed = signal.get("observed") if isinstance(signal.get("observed"), Mapping) else {}
+    rebuilt = _statement(str(signal.get("signal") or ""), observed)
+    return en(rebuilt) if rebuilt is not None else statement
+
+
+def _signal(name: str, source: str, endpoint: str, **observed: Any) -> dict[str, Any]:
     """One observed statement about one journal.
 
     `observed` holds the raw values the statement was read off, so a reader who
     disbelieves the sentence can check the numbers without going back to the API.
     Nothing in this dict is a judgement; `statement` describes what the endpoint
-    returned and stops there.
+    returned and stops there, and it is built from `observed` by `_statement`, so
+    it cannot name a value the dict does not hold.
 
     The endpoint is recorded without its query string. `mailto` is the only
     parameter this module ever sends and it is the user's own address; the risk
@@ -227,12 +342,13 @@ def _signal(name: str, source: str, endpoint: str, statement: str, **observed: A
     mailed, so the address stays out of both. The URL left behind is still the
     one a reader can paste to check the claim.
     """
+    kept = {key: value for key, value in observed.items() if value is not None}
     return {
         "signal": name,
         "source": source,
         "endpoint": endpoint.split("?", 1)[0],
-        "statement": statement,
-        "observed": {key: value for key, value in observed.items() if value is not None},
+        "statement": _statement(name, kept) or "",
+        "observed": kept,
     }
 
 
@@ -290,32 +406,17 @@ def fetch_doaj_journal(client: RobustHTTPClient, issn: str) -> list[dict[str, An
         logger.debug("  [%s] total 字段异常: %r", SOURCE_DOAJ, total)
         return []
     if total <= 0:
-        return [_signal(
-            SIGNAL_DOAJ_NOT_INDEXED, SOURCE_DOAJ, endpoint,
-            "未被 DOAJ 收录 — this ISSN is not in the Directory of Open Access Journals. DOAJ "
-            "indexes open-access journals only, so a subscription journal is absent by "
-            "construction and this is not a finding about it.",
-            total=total,
-        )]
+        return [_signal(SIGNAL_DOAJ_NOT_INDEXED, SOURCE_DOAJ, endpoint, total=total)]
 
     results = data.get("results")
     record = results[0] if isinstance(results, list) and results and isinstance(results[0], dict) else {}
     bibjson = record.get("bibjson") if isinstance(record.get("bibjson"), dict) else {}
-    signals = [_signal(
-        SIGNAL_DOAJ_INDEXED, SOURCE_DOAJ, endpoint,
-        "已被 DOAJ 收录 — this ISSN is in the Directory of Open Access Journals. DOAJ applies "
-        "entry criteria and does not audit a journal afterwards, so this is a membership fact "
-        "and not a quality certificate.",
-        total=total,
-    )]
+    signals = [_signal(SIGNAL_DOAJ_INDEXED, SOURCE_DOAJ, endpoint, total=total)]
 
     discontinued = bibjson.get("discontinued_date")
     if discontinued:
-        signals.append(_signal(
-            SIGNAL_DOAJ_DISCONTINUED, SOURCE_DOAJ, endpoint,
-            f"DOAJ records this journal as discontinued on {discontinued}.",
-            discontinued_date=str(discontinued),
-        ))
+        signals.append(_signal(SIGNAL_DOAJ_DISCONTINUED, SOURCE_DOAJ, endpoint,
+                               discontinued_date=str(discontinued)))
 
     apc = bibjson.get("apc") if isinstance(bibjson.get("apc"), dict) else {}
     has_apc = _as_bool(apc.get("has_apc"))
@@ -323,24 +424,14 @@ def fetch_doaj_journal(client: RobustHTTPClient, issn: str) -> list[dict[str, An
         amounts = apc.get("max") if isinstance(apc.get("max"), list) else []
         priced = [f"{item.get('price')} {item.get('currency')}"
                   for item in amounts if isinstance(item, dict) and item.get("price") is not None]
-        signals.append(_signal(
-            SIGNAL_DOAJ_APC, SOURCE_DOAJ, endpoint,
-            ("DOAJ records an article processing charge: " + (", ".join(priced) or "amount not stated")
-             + ". An APC is how open access is normally funded and is not on its own a warning sign."
-             ) if has_apc else "DOAJ records no article processing charge for this journal.",
-            has_apc=has_apc, amounts=priced or None,
-        ))
+        signals.append(_signal(SIGNAL_DOAJ_APC, SOURCE_DOAJ, endpoint,
+                               has_apc=has_apc, amounts=priced or None))
 
     review = ((bibjson.get("editorial") or {}).get("review_process")
               if isinstance(bibjson.get("editorial"), dict) else None)
     if review:
         stated = ", ".join(str(item) for item in review) if isinstance(review, list) else str(review)
-        signals.append(_signal(
-            SIGNAL_DOAJ_REVIEW, SOURCE_DOAJ, endpoint,
-            f"DOAJ records the peer review process the publisher declared: {stated}. Declared, "
-            f"not verified.",
-            review_process=stated,
-        ))
+        signals.append(_signal(SIGNAL_DOAJ_REVIEW, SOURCE_DOAJ, endpoint, review_process=stated))
     return signals
 
 
@@ -370,12 +461,7 @@ def fetch_crossref_journal(client: RobustHTTPClient, issn: str, mailto: str = ""
 
     message = data.get("message") if isinstance(data.get("message"), dict) else None
     if message is None:
-        return [_signal(
-            SIGNAL_CROSSREF_UNKNOWN, SOURCE_CROSSREF, endpoint,
-            "Crossref 无此刊记录 — Crossref returned no journal record for this ISSN. A journal "
-            "with no Crossref record deposits its DOIs elsewhere or has none; this is not a "
-            "statement about the journal's standing.",
-        )]
+        return [_signal(SIGNAL_CROSSREF_UNKNOWN, SOURCE_CROSSREF, endpoint)]
 
     signals: list[dict[str, Any]] = []
     coverage = message.get("coverage") if isinstance(message.get("coverage"), dict) else {}
@@ -383,26 +469,14 @@ def fetch_crossref_journal(client: RobustHTTPClient, issn: str, mailto: str = ""
                for field in TRACKED_COVERAGE_FIELDS if _as_number(coverage.get(field)) is not None}
     if present:
         empty = sorted(field for field, value in present.items() if value == 0.0)
-        signals.append(_signal(
-            SIGNAL_CROSSREF_COVERAGE, SOURCE_CROSSREF, endpoint,
-            f"Crossref 元数据缺失 {len(empty)} 项（共查 {len(present)} 项）— {len(empty)} of "
-            f"{len(present)} tracked Crossref metadata fields are deposited for none of this "
-            f"journal's current content"
-            + (f": {', '.join(empty)}. " if empty else ". ")
-            + "This measures what the publisher deposits, not what the journal is worth: entirely "
-              "ordinary journals sit at zero on several of these.",
-            missing=len(empty), tracked=len(present), missing_fields=empty or None,
-        ))
+        signals.append(_signal(SIGNAL_CROSSREF_COVERAGE, SOURCE_CROSSREF, endpoint,
+                               missing=len(empty), tracked=len(present), missing_fields=empty or None))
 
     counts = message.get("counts") if isinstance(message.get("counts"), dict) else {}
     total_dois = _as_number(counts.get("total-dois"))
     if total_dois is not None:
-        signals.append(_signal(
-            SIGNAL_CROSSREF_DOIS, SOURCE_CROSSREF, endpoint,
-            f"Crossref holds {int(total_dois)} deposited DOI(s) for this journal, published by "
-            f"{message.get('publisher') or 'a publisher Crossref did not name'}.",
-            total_dois=int(total_dois), publisher=message.get("publisher") or None,
-        ))
+        signals.append(_signal(SIGNAL_CROSSREF_DOIS, SOURCE_CROSSREF, endpoint,
+                               total_dois=int(total_dois), publisher=message.get("publisher") or None))
     return signals
 
 
@@ -424,52 +498,28 @@ def fetch_openalex_source(client: RobustHTTPClient, issn: str, mailto: str = "")
     if data is None:
         return []
     if not data.get("id"):
-        return [_signal(
-            SIGNAL_OPENALEX_UNKNOWN, SOURCE_OPENALEX, endpoint,
-            "OpenAlex 无此刊记录 — OpenAlex holds no source record for this ISSN.",
-        )]
+        return [_signal(SIGNAL_OPENALEX_UNKNOWN, SOURCE_OPENALEX, endpoint)]
 
     signals: list[dict[str, Any]] = []
     in_doaj = _as_bool(data.get("is_in_doaj"))
     if in_doaj is not None:
         since = data.get("is_in_doaj_since_year")
-        signals.append(_signal(
-            SIGNAL_OPENALEX_DOAJ, SOURCE_OPENALEX, endpoint,
-            ("OpenAlex records this journal as in DOAJ" + (f" since {since}." if since else ".")
-             if in_doaj else "OpenAlex records this journal as not in DOAJ.")
-            + " OpenAlex's copy can lag DOAJ's own live answer, which is a separate line above; "
-              "both are printed and neither is preferred.",
-            is_in_doaj=in_doaj, since_year=since,
-        ))
+        signals.append(_signal(SIGNAL_OPENALEX_DOAJ, SOURCE_OPENALEX, endpoint,
+                               is_in_doaj=in_doaj, since_year=since))
 
     scopus = _as_bool(data.get("is_indexed_in_scopus"))
-    signals.append(_signal(
-        SIGNAL_OPENALEX_SCOPUS, SOURCE_OPENALEX, endpoint,
-        ("OpenAlex records this journal as indexed in Scopus." if scopus is True else
-         "OpenAlex records this journal as not indexed in Scopus." if scopus is False else
-         "OpenAlex has no Scopus indexing value for this journal — the field is null, which is "
-         "common and is not the same as not being indexed."),
-        is_indexed_in_scopus=scopus,
-    ))
+    signals.append(_signal(SIGNAL_OPENALEX_SCOPUS, SOURCE_OPENALEX, endpoint,
+                           is_indexed_in_scopus=scopus))
 
     apc = _as_number(data.get("apc_usd"))
     if apc is not None:
-        signals.append(_signal(
-            SIGNAL_OPENALEX_APC, SOURCE_OPENALEX, endpoint,
-            f"OpenAlex records an article processing charge of about {int(apc)} USD.",
-            apc_usd=int(apc),
-        ))
+        signals.append(_signal(SIGNAL_OPENALEX_APC, SOURCE_OPENALEX, endpoint, apc_usd=int(apc)))
 
     works = _as_number(data.get("works_count"))
     if works is not None:
-        signals.append(_signal(
-            SIGNAL_OPENALEX_WORKS, SOURCE_OPENALEX, endpoint,
-            f"OpenAlex has indexed {int(works)} work(s) from this journal, published by "
-            f"{data.get('host_organization_name') or 'a publisher OpenAlex did not name'}"
-            + (f" in {data['country_code']}" if data.get("country_code") else "") + ".",
-            works_count=int(works), publisher=data.get("host_organization_name") or None,
-            country_code=data.get("country_code") or None,
-        ))
+        signals.append(_signal(SIGNAL_OPENALEX_WORKS, SOURCE_OPENALEX, endpoint,
+                               works_count=int(works), publisher=data.get("host_organization_name") or None,
+                               country_code=data.get("country_code") or None))
     return signals
 
 
@@ -777,7 +827,8 @@ def load_risk_json(filepath: str) -> dict[str, Any]:
     with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"journal risk JSON 顶层不是对象: {filepath}")
+        raise ValueError(lazy_zh("journal risk JSON 顶层不是对象: {filepath}",
+                                 filepath=filepath))
 
     records = data.get("records")
     if not isinstance(records, list):

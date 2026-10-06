@@ -58,6 +58,7 @@ from typing import Any
 from urllib.parse import quote_plus
 
 from .http_client import RobustHTTPClient, Response, polite_headers
+from .i18n import zh
 from .pubmed_api import (
     _MARK_OPENALEX,
     OPENALEX_IDS_FIELD,
@@ -360,7 +361,7 @@ def resolve_author(
 
     if not candidates:
         logger.warning("OpenAlex 里没有匹配「%s」%s的作者。", name,
-                       f"（机构含「{affiliation}」）" if affiliation else "")
+                       zh("（机构含「{affiliation}」）", affiliation=affiliation) if affiliation else "")
         return _resolution("none", query=query, candidates=[], now=now)
 
     if len(candidates) == 1:
@@ -373,7 +374,7 @@ def resolve_author(
             chosen["display_name"], chosen["openalex_author_id"],
             chosen["orcid"] or "无",
             chosen["works_count"] if chosen["works_count"] is not None else "?",
-            "、".join(inst["display_name"] for inst in chosen["institutions"]) or "未记录",
+            zh("、").join(inst["display_name"] for inst in chosen["institutions"]) or "未记录",
         )
         return _resolution("unique", query=query, candidates=candidates,
                            author_id=chosen["openalex_author_id"], now=now)
@@ -390,7 +391,7 @@ def resolve_author(
             candidate["openalex_author_id"], candidate["orcid"] or "无",
             candidate["works_count"] if candidate["works_count"] is not None else "?",
             candidate["cited_by_count"] if candidate["cited_by_count"] is not None else "?",
-            "、".join(
+            zh("、").join(
                 f"{inst['display_name']}"
                 + (f"（{inst['years'][0]}-{inst['years'][-1]}）" if inst["years"] else "")
                 for inst in candidate["institutions"]

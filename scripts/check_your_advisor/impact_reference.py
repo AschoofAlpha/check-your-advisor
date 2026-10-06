@@ -89,6 +89,7 @@ from urllib.parse import quote, quote_plus
 
 from .citations import normalise_doi
 from .http_client import RobustHTTPClient, Response, polite_headers
+from .i18n import lazy_zh
 
 logger = logging.getLogger("check_your_advisor.impact_reference")
 
@@ -1222,7 +1223,8 @@ def load_impact_reference_json(filepath: str) -> dict[str, Any]:
     with open(filepath, encoding="utf-8") as handle:
         data = json.load(handle)
     if not isinstance(data, dict):
-        raise ValueError(f"impact reference JSON 顶层不是对象: {filepath}")
+        raise ValueError(lazy_zh("impact reference JSON 顶层不是对象: {filepath}",
+                                 filepath=filepath))
 
     records = data.get("records")
     if not isinstance(records, list):

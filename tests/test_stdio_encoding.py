@@ -59,8 +59,13 @@ def check_true(label: str, value) -> None:
 
 
 def run(args: list[str], encoding: str = "ascii") -> subprocess.CompletedProcess:
-    """Run the real CLI with a stdout codec that cannot hold Chinese."""
-    env = {**os.environ, "PYTHONIOENCODING": encoding}
+    """Run the real CLI with a stdout codec that cannot hold Chinese.
+
+    The messages are pinned to Chinese: on an English locale the command line now
+    prints English, which any codec can hold, and that would pass every check
+    below without testing anything.
+    """
+    env = {**os.environ, "PYTHONIOENCODING": encoding, "CHECK_YOUR_ADVISOR_LANG": "zh"}
     return subprocess.run(
         [sys.executable, str(RUN_PY), *args],
         capture_output=True, text=True, encoding="utf-8", errors="replace",
@@ -73,7 +78,9 @@ r = run(["--help"])
 check("it exits 0 instead of dying on the first help line", r.returncode, 0)
 out = r.stdout + r.stderr
 check_true("no encoding error escaped", "UnicodeEncodeError" not in out)
-check_true("and it actually printed the usage", "usage:" in out)
+# argparse's own "usage: " follows the pinned language too, so the prefix itself
+# is one of the Chinese strings this codec could not hold.
+check_true("and it actually printed the usage", "用法：" in out)
 
 
 print("\nA normal error path still logs, rather than logging about logging")

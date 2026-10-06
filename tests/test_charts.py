@@ -30,7 +30,7 @@ from xml.etree import ElementTree
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
 
-from check_your_advisor.profile import charts, metrics  # noqa: E402
+from check_your_advisor.profile import charts, figures, metrics  # noqa: E402
 
 _passed = 0
 _failed = 0
@@ -544,7 +544,7 @@ print("\n[C-SPAN] censoring is the structure, not a footnote")
 span = DRAWN["C-SPAN"]
 span_svg = svg_of(span)
 check("one dot per person in the cohort", len(span["rows"]), S5["cohort_denominator"])
-for key, label in charts._SPAN_LANES:
+for key, label in figures._SPAN_LANES:
     check(f"the {label} lane draws every one of its people",
           count(span_svg, f'class="dot span {key}"'), S5["buckets"][key])
     check_true(f"the {label} lane declares its own count",

@@ -25,6 +25,7 @@ from typing import Any
 # exclude exactly the records the shared helper cannot date, not a private
 # approximation of them.
 from ..corpus import _date_iso
+from ..i18n import lazy_en
 from ..pubmed_api import (
     _affiliation_matches,
     _email_domain_matches,
@@ -763,7 +764,7 @@ def rank_people(
         "field": field,
         "label": label,
         "n": len(ranked),
-        "basis": RANK_BASIS.format(n=len(ranked), label=label),
+        "basis": lazy_en(RANK_BASIS, n=len(ranked), label=lazy_en(label)),
         "ranked": ranked,
     }
 

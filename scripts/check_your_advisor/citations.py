@@ -81,6 +81,7 @@ from typing import Any
 from urllib.parse import quote, quote_plus
 
 from .http_client import RobustHTTPClient, Response, polite_headers
+from .i18n import lazy_zh
 
 logger = logging.getLogger("check_your_advisor.citations")
 
@@ -633,7 +634,8 @@ def load_citations_json(filepath: str) -> dict[str, Any]:
     with open(filepath, encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
-        raise ValueError(f"citations JSON 顶层不是对象: {filepath}")
+        raise ValueError(lazy_zh("citations JSON 顶层不是对象: {filepath}",
+                                 filepath=filepath))
 
     records = data.get("records")
     if not isinstance(records, list):

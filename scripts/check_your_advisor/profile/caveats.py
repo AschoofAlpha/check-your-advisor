@@ -43,6 +43,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..i18n import en
+
 CAVEATS: dict[str, str] = {
     "CAV-00": (
         "This report describes publication metadata, and nothing else. PubMed contains only people "
@@ -261,8 +263,16 @@ CAVEATS: dict[str, str] = {
 
 
 def caveat(caveat_id: str, **fields: Any) -> str:
-    """Formatted caveat text. Missing fields raise rather than render a hole."""
-    return CAVEATS[caveat_id].format(**fields)
+    """Formatted caveat text, in the language being written.
+
+    Missing fields raise rather than render a hole, in every language: the
+    English template is formatted first whichever language comes back, so a
+    caveat missing a field cannot slip through on the strength of a translation
+    that happens not to use it.
+    """
+    template = CAVEATS[caveat_id]
+    template.format(**fields)
+    return en(template, **fields) if fields else en(template)
 
 
 # Section 10 of the spec, rendered verbatim as report Section 14. It is part of
@@ -345,7 +355,7 @@ DROPPED_REGISTER: tuple[tuple[str, str], ...] = (
         "Field-normalised citation impact",
         "Not implemented, for want of an input rather than by decision. It needs a subject "
         "classification plus per-field citation distributions at record level, and no free source "
-        "supplies both. Its absence is why the citation numbers above carry a field-confound note "
+        "supplies both. Its absence is why the citation numbers in Section 15 carry a field-confound note "
         "instead of a correction, and why nothing computed from them is comparable across fields.",
     ),
     (

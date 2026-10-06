@@ -60,6 +60,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
+from ..i18n import lazy_en, lazy_join
 from .scoring import COMPONENT_NAMES
 
 __all__ = [
@@ -342,8 +343,9 @@ def _resolve(entry: Any, fallback_label: str) -> _Resolved:
         gate_id = (gate or {}).get("id", "?")
         gate_name = (gate or {}).get("name", "")
         return unranked(
-            f"the report for this corpus was refused at gate {gate_id} ({gate_name}), so there "
-            "is no score to place"
+            lazy_en("the report for this corpus was refused at gate {gate_id} ({gate_name}), "
+                    "so there is no score to place",
+                    gate_id=gate_id, gate_name=lazy_en(gate_name))
         )
     if warnings:
         # The report was built and its score is inside the row. What is withheld
@@ -357,27 +359,29 @@ def _resolve(entry: Any, fallback_label: str) -> _Resolved:
         # describe more than one researcher", which is what G2 and G3 mean and is
         # not what G1 means: a truncated harvest of one person is still one
         # person, and the row said otherwise for every such corpus.
-        named = ", ".join(
-            f"{(item or {}).get('id', '?')} ({(item or {}).get('name', '')})"
+        named = lazy_join([
+            lazy_en("{id} ({name})", id=(item or {}).get('id', '?'), name=lazy_en((item or {}).get('name', '')))
             for item in warnings
             if isinstance(item, Mapping)
-        ) or "a warning"
+        ], ", ") or lazy_en("a warning")
         return unranked(
-            f"this corpus carries warning {named}; the report and its score are in the row, but "
-            "a rank compares corpora that are each complete and each about one person, and this "
-            "one is not certified to be, so the position is withheld",
+            lazy_en("this corpus carries warning {named}; the report and its score are in the "
+                    "row, but a rank compares corpora that are each complete and each about "
+                    "one person, and this one is not certified to be, so the position is "
+                    "withheld",
+                    named=named),
             _scored_components(score) if score is not None else (),
         )
     if score is None:
-        return unranked("this corpus carries no composite score")
+        return unranked(lazy_en("this corpus carries no composite score"))
 
     components = _scored_components(score)
     value = score.get("score")
     if score.get("suppressed") or value is None:
         return unranked(
-            f"the composite score was suppressed at {int(score.get('denominator') or 0)} scored "
-            f"component(s), floor {int(score.get('min_components') or 0)}; the parts are in the "
-            "report, the total is not",
+            lazy_en("the composite score was suppressed at {denominator} scored component(s), "
+                    "floor {min_components}; the parts are in the report, the total is not",
+                    denominator=int(score.get('denominator') or 0), min_components=int(score.get('min_components') or 0)),
             components,
         )
     return _Resolved(
@@ -462,7 +466,7 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
         )
 
     resolved = [
-        _resolve(entry, f"corpus {index + 1}") for index, entry in enumerate(corpora)
+        _resolve(entry, lazy_en("corpus {value}", value=index + 1)) for index, entry in enumerate(corpora)
     ]
     scored = [item for item in resolved if item.unavailable is None]
     suppressed = len(scored) < MIN_RANKED_CORPORA
@@ -518,8 +522,10 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
             "n_components": len(item.components),
             "components": list(item.components),
             "reason": item.unavailable or (
-                f"only {len(scored)} corpus/corpora on this page carried a score, floor "
-                f"{MIN_RANKED_CORPORA}; with fewer than that there is nothing to be first among"
+                lazy_en("only {n_scored} corpus/corpora on this page carried a score, floor "
+                        "{min_ranked_corpora}; with fewer than that there is nothing to be first "
+                        "among",
+                        n_scored=len(scored), min_ranked_corpora=MIN_RANKED_CORPORA)
             ),
             "gate": item.gate,
         }
@@ -528,28 +534,26 @@ def rank_corpora(corpora: Any) -> dict[str, Any]:
 
     if sets_match and weights_match:
         note = (
-            "Every ranked corpus scored on the same components under the same weight table, so "
-            "the ranked numbers are means over like inputs."
+            lazy_en("Every ranked corpus scored on the same components under the same weight table, so "
+                    "the ranked numbers are means over like inputs.")
         )
     else:
         differing = []
         if not sets_match:
-            differing.append(
-                "the ranked corpora did not all score on the same components ("
-                + "; ".join(
-                    f"{len(names)}: {', '.join(names) or 'none'}" for names in component_sets
-                )
-                + ")"
-            )
+            differing.append(lazy_en(
+                "the ranked corpora did not all score on the same components ({sets})",
+                sets="; ".join(
+                    f"{len(names)}: {', '.join(names) or lazy_en('none')}" for names in component_sets
+                ),
+            ))
         if not weights_match:
-            differing.append("more than one weight table is present among the ranked corpora")
-        note = (
-            "These ranks order numbers that were not all built the same way: "
-            + "; and ".join(differing)
-            + ". A mean over four components and a mean over six share a scale and not a "
-            "meaning, so read the ranks with each row's component count in view, and take no "
-            "single-sentence conclusion from them — comparative_statement refuses this pair "
-            "outright for exactly this reason."
+            differing.append(lazy_en("more than one weight table is present among the ranked corpora"))
+        note = lazy_en(
+            "These ranks order numbers that were not all built the same way: {differing}. A mean "
+            "over four components and a mean over six share a scale and not a meaning, so read the "
+            "ranks with each row's component count in view, and take no single-sentence conclusion "
+            "from them — comparative_statement refuses this pair outright for exactly this reason.",
+            differing=lazy_join(differing, lazy_en("; and ")),
         )
 
     return {
@@ -657,14 +661,15 @@ def star_rating(score: Any) -> dict[str, Any]:
         value = score.get("score")
         if suppressed or value is None:
             return _no_stars(
-                f"the composite score was suppressed at {denominator} scored component(s), floor "
-                f"{int(score.get('min_components') or 0)}; there is no total to coarsen",
+                lazy_en("the composite score was suppressed at {denominator} scored component(s), "
+                        "floor {min_components}; there is no total to coarsen",
+                        denominator=denominator, min_components=int(score.get('min_components') or 0)),
                 denominator=denominator,
                 registered=registered,
                 suppressed=True,
             )
     elif score is None:
-        return _no_stars("no composite score was supplied")
+        return _no_stars(lazy_en("no composite score was supplied"))
     elif isinstance(score, (str, bytes)) or isinstance(score, Sequence):
         raise TypeError(
             f"star_rating rates one score at a time, not a {type(score).__name__} of them. To "
@@ -891,8 +896,8 @@ def comparative_statement(a: Any, b: Any) -> dict[str, Any]:
     A tie is a tie at the printed precision, and the statement says so rather
     than implying the two are equal in any deeper sense.
     """
-    left = _resolve(a, "corpus A")
-    right = _resolve(b, "corpus B")
+    left = _resolve(a, lazy_en("corpus A"))
+    right = _resolve(b, lazy_en("corpus B"))
 
     def result(**fields: Any) -> dict[str, Any]:
         base: dict[str, Any] = {
@@ -924,43 +929,49 @@ def comparative_statement(a: Any, b: Any) -> dict[str, Any]:
 
     blocked = [item for item in (left, right) if item.unavailable is not None]
     if blocked:
-        reason = "; ".join(f"{item.label}: {item.unavailable}" for item in blocked)
+        reason = lazy_join([lazy_en("{label}: {unavailable}", label=item.label,
+                                    unavailable=lazy_en(item.unavailable))
+                            for item in blocked], "; ")
         return result(
             statement=(
-                f"{left.label} and {right.label} cannot be compared: {reason}. Nothing is being "
-                "said about either one — this is a statement about the data, not about the "
-                "corpora."
+                lazy_en("{label} and {label_2} cannot be compared: {reason}. Nothing is being said "
+                        "about either one — this is a statement about the data, not about the "
+                        "corpora.",
+                        label=left.label, label_2=right.label, reason=reason)
             ),
             reason=reason,
         )
 
     if left.components != right.components:
         reason = (
-            f"{left.label} scored on {len(left.components)} component(s) "
-            f"({', '.join(left.components) or 'none'}) and {right.label} on "
-            f"{len(right.components)} ({', '.join(right.components) or 'none'})"
+            lazy_en("{label} scored on {n_components} component(s) ({components}) and "
+                    "{label_2} on {n_components_2} ({components_2})",
+                    label=left.label, n_components=len(left.components), components=', '.join(left.components) or lazy_en('none'), label_2=right.label, n_components_2=len(right.components), components_2=', '.join(right.components) or lazy_en('none'))
         )
         return result(
             statement=(
-                f"{left.label} and {right.label} are not directly comparable: {reason}. Both "
-                "totals are weighted means, so they run on the same 0-100 scale over different "
-                "material and their difference has no subject. The difference is not printed "
-                "here on purpose. To compare them, score both on the components they share by "
-                "setting the others to weight 0.0, then ask again."
+                lazy_en("{label} and {label_2} are not directly comparable: {reason}. Both totals "
+                        "are weighted means, so they run on the same 0-100 scale over different "
+                        "material and their difference has no subject. The difference is not "
+                        "printed here on purpose. To compare them, score both on the components "
+                        "they share by setting the others to weight 0.0, then ask again.",
+                        label=left.label, label_2=right.label, reason=lazy_en(reason))
             ),
             reason=reason,
         )
 
     if left.weight_signature != right.weight_signature:
         reason = (
-            f"{left.label} and {right.label} were scored under different weight tables, so the "
-            "two totals are different quantities that happen to share a scale"
+            lazy_en("{label} and {label_2} were scored under different weight tables, so the "
+                    "two totals are different quantities that happen to share a scale",
+                    label=left.label, label_2=right.label)
         )
         return result(
             statement=(
-                f"{left.label} and {right.label} are not directly comparable: {reason}. Rescore "
-                "both under one table — build_comparison applies a single table to every corpus "
-                "for this reason — and ask again."
+                lazy_en("{label} and {label_2} are not directly comparable: {reason}. Rescore both "
+                        "under one table — build_comparison applies a single table to every corpus "
+                        "for this reason — and ask again.",
+                        label=left.label, label_2=right.label, reason=lazy_en(reason))
             ),
             reason=reason,
         )
@@ -974,10 +985,11 @@ def comparative_statement(a: Any, b: Any) -> dict[str, Any]:
             difference=0.0,
             denominator=shared,
             statement=(
-                f"{left.label} and {right.label} both score {left.value:.1f} out of "
-                f"{SCORE_SCALE_MAX:g} on the same {shared} component(s) ({names}) under one "
-                f"weight table. That is a tie at the printed precision of {TIE_DECIMALS} "
-                "decimal, not a finding that the two are alike."
+                lazy_en("{label} and {label_2} both score {value:.1f} out of {score_scale_max:g} "
+                        "on the same {shared} component(s) ({names}) under one weight table. That "
+                        "is a tie at the printed precision of {tie_decimals} decimal, not a "
+                        "finding that the two are alike.",
+                        label=left.label, label_2=right.label, value=left.value, score_scale_max=SCORE_SCALE_MAX, shared=shared, names=names, tie_decimals=TIE_DECIMALS)
             ),
         )
 
@@ -991,10 +1003,11 @@ def comparative_statement(a: Any, b: Any) -> dict[str, Any]:
         difference=difference,
         denominator=shared,
         statement=(
-            f"{higher.label} scores higher than {lower.label}: {higher.value:.1f} against "
-            f"{lower.value:.1f} out of {SCORE_SCALE_MAX:g}, a difference of {difference:.1f} "
-            f"point(s), both computed over the same {shared} component(s) ({names}) under one "
-            "weight table. What is higher is that weighted mean; the sentence says nothing "
-            "beyond it."
+            lazy_en("{label} scores higher than {label_2}: {value:.1f} against {value_2:.1f} "
+                    "out of {score_scale_max:g}, a difference of {difference:.1f} point(s), "
+                    "both computed over the same {shared} component(s) ({names}) under one "
+                    "weight table. What is higher is that weighted mean; the sentence says "
+                    "nothing beyond it.",
+                    label=higher.label, label_2=lower.label, value=higher.value, value_2=lower.value, score_scale_max=SCORE_SCALE_MAX, difference=difference, shared=shared, names=names)
         ),
     )

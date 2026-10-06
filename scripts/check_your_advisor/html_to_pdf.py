@@ -51,6 +51,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .i18n import en, lazy_en, zh
+
 logger = logging.getLogger("check_your_advisor.pdf_export")
 
 __all__ = [
@@ -230,20 +232,20 @@ def install_hint_lines() -> list[str]:
     system = platform.system()
     marker = {"Windows": "Windows:", "Darwin": "macOS:"}.get(system, "Debian/Ubuntu:")
     lines = [
-        "No HTML-to-PDF converter was found on this machine. The HTML report is complete and "
-        "unchanged — a PDF is a second copy of it, not a different document.",
-        "Install any one of these, then re-run with --pdf:",
+        lazy_en("No HTML-to-PDF converter was found on this machine. The HTML report is complete "
+                "and unchanged — a PDF is a second copy of it, not a different document."),
+        lazy_en("Install any one of these, then re-run with --pdf:"),
     ]
     for name in CONVERTER_ORDER:
         converter = CONVERTERS[name]
         mine = [line for line in converter.install if line.startswith(marker)]
         rest = [line for line in converter.install if not line.startswith(marker)]
-        lines.append(f"- {name} — {converter.notes}")
+        lines.append(lazy_en("- {name} — {notes}", name=name, notes=lazy_en(converter.notes)))
         lines += [f"    {line}" for line in mine + rest]
-    lines.append(
-        "Nothing is downloaded for you. This package runs a program that is already installed and "
-        "never fetches an installer."
-    )
+    lines.append(lazy_en(
+        "Nothing is downloaded for you. This package runs a program that is already installed "
+        "and never fetches an installer."
+    ))
     return lines
 
 
@@ -307,12 +309,13 @@ def convert(
     }
 
     if not source.is_file():
-        result["reason"] = f"{source} does not exist, so there was nothing to convert."
+        result["reason"] = lazy_en("{source} does not exist, so there was nothing to convert.",
+                                   source=source)
         return result
 
     chosen = find_converter(prefer=prefer, explicit_path=explicit_path)
     if not chosen:
-        result["reason"] = "no HTML-to-PDF converter is installed on this machine."
+        result["reason"] = lazy_en("no HTML-to-PDF converter is installed on this machine.")
         result["hint_lines"] = install_hint_lines()
         return result
 
@@ -329,11 +332,13 @@ def convert(
             completed = run(argv, capture_output=True, text=True, timeout=timeout,
                             encoding="utf-8", errors="replace")
         except subprocess.TimeoutExpired:
-            result["reason"] = (f"{chosen['name']} did not finish within {timeout}s and was "
-                                f"abandoned. The HTML report is unaffected.")
+            result["reason"] = lazy_en("{name} did not finish within {timeout}s and was "
+                                       "abandoned. The HTML report is unaffected.",
+                                       name=chosen['name'], timeout=timeout)
             return result
         except OSError as exc:
-            result["reason"] = f"{chosen['name']} could not be started: {exc}"
+            result["reason"] = lazy_en("{name} could not be started: {exc}",
+                                       name=chosen['name'], exc=exc)
             return result
 
         result["returncode"] = getattr(completed, "returncode", None)
@@ -349,17 +354,19 @@ def convert(
                 produced.replace(target)
 
     if not target.is_file():
-        result["reason"] = (
-            f"{chosen['name']} exited {result['returncode']} and wrote no file to {target}."
-            + (f" It said: {result['stderr']}" if result["stderr"] else "")
+        result["reason"] = lazy_en(
+            "{name} exited {returncode} and wrote no file to {target}.{said}",
+            name=chosen['name'], returncode=result['returncode'], target=target,
+            said=lazy_en(" It said: {stderr}", stderr=result['stderr']) if result["stderr"] else "",
         )
         return result
     if result["returncode"] not in (0, None):
         # A file exists but the converter complained. Reported as produced, with
         # the complaint attached: a page that rendered with one warning is more
         # use than a refusal, and the reader is told which it is.
-        result["reason"] = (f"{chosen['name']} exited {result['returncode']} but did write "
-                            f"{target}; check the page before circulating it.")
+        result["reason"] = lazy_en("{name} exited {returncode} but did write {target}; check "
+                                   "the page before circulating it.",
+                                   name=chosen['name'], returncode=result['returncode'], target=target)
     result["ok"] = True
     result["pdf_path"] = str(target)
     return result
@@ -375,9 +382,11 @@ def describe(result: dict[str, Any]) -> list[str]:
     if not isinstance(result, dict):
         return []
     if result.get("ok"):
-        lines = [f"PDF 已生成: {result['pdf_path']}（转换器 {result['converter']}，"
-                 f"{result['converter_path']}）"]
+        lines = [zh("PDF 已生成: {pdf_path}（转换器 {converter}，{converter_path}）",
+                    pdf_path=result['pdf_path'], converter=result['converter'],
+                    converter_path=result['converter_path'])]
         if result.get("reason"):
-            lines.append(f"注意: {result['reason']}")
+            lines.append(zh("注意: {reason}", reason=result['reason']))
         return lines
-    return [f"未生成 PDF: {result.get('reason', '')}"] + list(result.get("hint_lines") or [])
+    return ([zh("未生成 PDF: {reason}", reason=result.get('reason', ''))]
+            + [en(line) for line in result.get("hint_lines") or []])

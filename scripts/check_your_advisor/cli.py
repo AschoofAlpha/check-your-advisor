@@ -59,12 +59,16 @@ import argparse
 import logging
 import os
 import sys
+import unicodedata
 from datetime import datetime
 from collections.abc import Mapping
 from typing import Any
 
 from check_your_advisor import __version__
 from check_your_advisor.config import DEFAULT_CONFIG, load_config
+from check_your_advisor import i18n
+from check_your_advisor.i18n import lazy_en, lazy_zh, zh
+from check_your_advisor.locales.argparse_zh import ARGPARSE_ZH
 
 
 def setup_logging(output_dir: str | None, level: str = "INFO"):
@@ -77,6 +81,8 @@ def setup_logging(output_dir: str | None, level: str = "INFO"):
     console = logging.StreamHandler(sys.stdout)
     console.setLevel(logging.INFO)
     console.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+    # 日志按 `--lang` / 系统语言输出；消息在代码里照旧用中文写，翻译在这里做。
+    console.addFilter(i18n.LogTranslator())
     root.addHandler(console)
 
     if output_dir is None:
@@ -90,6 +96,7 @@ def setup_logging(output_dir: str | None, level: str = "INFO"):
     file_handler.setFormatter(logging.Formatter(
         "%(asctime)s [%(name)s] %(levelname)s: %(message)s"
     ))
+    file_handler.addFilter(i18n.LogTranslator())
     root.addHandler(file_handler)
 
     return log_file
@@ -98,264 +105,264 @@ def setup_logging(output_dir: str | None, level: str = "INFO"):
 def parse_fetch_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor [harvest]",
-        description="检索一位研究者的论文、把同名的人挡在外面、可选下载 PDF（默认子命令；可省略 harvest）",
+        description=zh("检索一位研究者的论文、把同名的人挡在外面、可选下载 PDF（默认子命令；可省略 harvest）"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（默认自动读取 config.json）")
-    parser.add_argument("--author", dest="author_name", help="目标作者名")
-    parser.add_argument("--affiliation", help="目标机构名")
-    parser.add_argument("--years-back", type=int, help="向前检索年数")
-    parser.add_argument("--email", help="Unpaywall 邮箱")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
+    parser.add_argument("--author", dest="author_name", help=zh("目标作者名"))
+    parser.add_argument("--affiliation", help=zh("目标机构名"))
+    parser.add_argument("--years-back", type=int, help=zh("向前检索年数"))
+    parser.add_argument("--email", help=zh("Unpaywall 邮箱"))
     parser.add_argument("--api-key", help="PubMed API key")
-    parser.add_argument("--output-dir", help="输出目录")
-    parser.add_argument("--pdf-dir", help="PDF 输出目录")
-    parser.add_argument("--cache-db", help="SQLite 缓存路径")
-    parser.add_argument("--max-workers", type=int, help="论文级并发下载线程数")
-    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help="日志级别")
-    parser.add_argument("--no-download", action="store_true", help="只检索与导出清单，不下载 PDF")
+    parser.add_argument("--output-dir", help=zh("输出目录"))
+    parser.add_argument("--pdf-dir", help=zh("PDF 输出目录"))
+    parser.add_argument("--cache-db", help=zh("SQLite 缓存路径"))
+    parser.add_argument("--max-workers", type=int, help=zh("论文级并发下载线程数"))
+    parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], help=zh("日志级别"))
+    parser.add_argument("--no-download", action="store_true", help=zh("只检索与导出清单，不下载 PDF"))
 
     identity = parser.add_argument_group(
-        "作者身份验证",
-        "把同名的另一个人挡在语料之外。一条都不给，得到的就是「所有叫这个名字的人」，"
-        "报告照常生成，但第 0/1/19 节顶部会带一行醒目提示说明这份语料没有身份证据、"
-        "进程退出码是 1。以前这些只能写在 config 文件里。",
+        zh("作者身份验证"),
+        zh("把同名的另一个人挡在语料之外。一条都不给，得到的就是「所有叫这个名字的人」，"
+           "报告照常生成，但第 0/1/19 节顶部会带一行醒目提示说明这份语料没有身份证据、"
+           "进程退出码是 1。以前这些只能写在 config 文件里。"),
     )
-    identity.add_argument("--orcid", help="本人 ORCID（最强证据，一条顶其余全部）")
+    identity.add_argument("--orcid", help=zh("本人 ORCID（最强证据，一条顶其余全部）"))
     identity.add_argument("--email-domain", action="append", dest="email_domains",
-                          metavar="DOMAIN", help="通讯邮箱域名，可重复给（如 pumc.edu.cn）")
+                          metavar="DOMAIN", help=zh("通讯邮箱域名，可重复给（如 pumc.edu.cn）"))
     identity.add_argument("--affiliation-keyword", action="append", dest="affiliation_keywords",
                           metavar="KEYWORD",
-                          help="机构关键词，可重复给。不给则自动取 --affiliation 的值")
+                          help=zh("机构关键词，可重复给。不给则自动取 --affiliation 的值"))
     identity.add_argument("--require-affiliation", action="store_true", default=None,
-                          help="机构不匹配就直接剔除，而不是标记为未验证后保留")
+                          help=zh("机构不匹配就直接剔除，而不是标记为未验证后保留"))
 
     openalex = parser.add_argument_group(
-        "OpenAlex（免费、无密钥）",
-        "第二个来源，两件事：按姓名+机构查作者候选做消歧，以及把该作者名下的 works "
-        "拉回来与 PubMed 语料合并去重。候选多于一个时不替你选——列出来让你认，"
-        "认出后加 --openalex-author-id 重跑。--email 会作为 mailto 一并发出，"
-        "那不是密钥，只换一条更宽松的限速通道。",
+        zh("OpenAlex（免费、无密钥）"),
+        zh("第二个来源，两件事：按姓名+机构查作者候选做消歧，以及把该作者名下的 works "
+           "拉回来与 PubMed 语料合并去重。候选多于一个时不替你选——列出来让你认，"
+           "认出后加 --openalex-author-id 重跑。--email 会作为 mailto 一并发出，"
+           "那不是密钥，只换一条更宽松的限速通道。"),
     )
     openalex.add_argument("--resolve-openalex", action="store_true", default=None,
-                          help="查 OpenAlex authors 接口，列出叫这个名字的候选作者及其 "
-                               "ORCID/机构史/作品数")
+                          help=zh("查 OpenAlex authors 接口，列出叫这个名字的候选作者及其 "
+                                  "ORCID/机构史/作品数"))
     openalex.add_argument("--openalex-author-id", metavar="ID",
-                          help="直接指定 OpenAlex 作者 ID（如 A5023888391），跳过候选查询")
+                          help=zh("直接指定 OpenAlex 作者 ID（如 A5023888391），跳过候选查询"))
     openalex.add_argument("--openalex-works", action="store_true", default=None,
-                          help="额外从 OpenAlex 拉该作者 ID 名下的作品，与 PubMed 语料按 "
-                               "DOI → PMID → 标题+年份 去重合并（需要一个确定的作者 ID）")
+                          help=zh("额外从 OpenAlex 拉该作者 ID 名下的作品，与 PubMed 语料按 "
+                                  "DOI → PMID → 标题+年份 去重合并（需要一个确定的作者 ID）"))
     openalex.add_argument("--max-works", type=int, metavar="N",
-                          help="OpenAlex 一次最多取回多少条作品（默认 2000）")
-    return parser.parse_args(argv)
+                          help=zh("OpenAlex 一次最多取回多少条作品（默认 2000）"))
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_clean_cache_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor clean-cache",
-        description="清理 SQLite 缓存里的过期失败记录（下载成功的记录不动）",
+        description=zh("清理 SQLite 缓存里的过期失败记录（下载成功的记录不动）"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（用于读取 cache_db）")
-    parser.add_argument("--cache-db", help="SQLite 缓存路径（覆盖 config）")
-    parser.add_argument("--output-dir", help="输出目录（用于推断默认 cache 路径）")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（用于读取 cache_db）"))
+    parser.add_argument("--cache-db", help=zh("SQLite 缓存路径（覆盖 config）"))
+    parser.add_argument("--output-dir", help=zh("输出目录（用于推断默认 cache 路径）"))
     parser.add_argument("--max-age-days", type=int, default=90,
-                        help="清理 N 天之前的失败记录（默认 90）")
+                        help=zh("清理 N 天之前的失败记录（默认 90）"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_download_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor download",
-        description="只跑 PDF 下载阶段：从已有 papers_*.json 读论文清单，跳过 PubMed efetch",
+        description=zh("只跑 PDF 下载阶段：从已有 papers_*.json 读论文清单，跳过 PubMed efetch"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（默认自动读取 config.json）")
-    parser.add_argument("--input", help="papers_*.json 路径（默认取 output-dir 下最新一份）")
-    parser.add_argument("--output-dir", help="输出目录（默认 pubmed_results）")
-    parser.add_argument("--pdf-dir", help="PDF 输出目录（默认 output-dir/pdfs）")
-    parser.add_argument("--cache-db", help="SQLite 缓存路径")
-    parser.add_argument("--max-workers", type=int, help="论文级并发下载线程数")
-    parser.add_argument("--email", help="Unpaywall 邮箱")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
+    parser.add_argument("--input", help=zh("papers_*.json 路径（默认取 output-dir 下最新一份）"))
+    parser.add_argument("--output-dir", help=zh("输出目录（默认 pubmed_results）"))
+    parser.add_argument("--pdf-dir", help=zh("PDF 输出目录（默认 output-dir/pdfs）"))
+    parser.add_argument("--cache-db", help=zh("SQLite 缓存路径"))
+    parser.add_argument("--max-workers", type=int, help=zh("论文级并发下载线程数"))
+    parser.add_argument("--email", help=zh("Unpaywall 邮箱"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_profile_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor profile",
-        description="从已有 papers_*.json 生成导师画像：发表记录反映出的「当这位 PI 的学生是什么样」",
-        epilog="报告给一个 0-100 的综合分，并把权重表和星级分档边界原样印出来。"
-               "第 2 节另起一张表，按一作名额给名单上的人排名次（名单本身不按数量重排）；"
-               "第 9 节只在年度点够多时才拟合斜率，并把区间印在同一句里；"
-               "跑过 cite --percentile 时，第 15 节说明有多少篇的引用数定位到了 OpenAlex 同领域同年的论文里。"
-               "综合分不给百分位（没有参照人群，算不出），报告里也没有 A/B/C 字母等级。"
-               "样本量下限是规范的一部分，不作为参数暴露。",
+        description=zh("从已有 papers_*.json 生成导师画像：发表记录反映出的「当这位 PI 的学生是什么样」"),
+        epilog=zh("报告给一个 0-100 的综合分，并把权重表和星级分档边界原样印出来。"
+                  "第 2 节另起一张表，按一作名额给名单上的人排名次（名单本身不按数量重排）；"
+                  "第 9 节只在年度点够多时才拟合斜率，并把区间印在同一句里；"
+                  "跑过 cite --percentile 时，第 15 节说明有多少篇的引用数定位到了 OpenAlex 同领域同年的论文里。"
+                  "综合分不给百分位（没有参照人群，算不出），报告里也没有 A/B/C 字母等级。"
+                  "样本量下限是规范的一部分，不作为参数暴露。"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（提供 author_identity、advisor 与 scoring.weights 配置）")
-    parser.add_argument("--output-dir", help="报告输出目录（默认与 fetch 相同：pubmed_results）")
-    parser.add_argument("--papers-json", help="papers_*.json 路径（默认取 output-dir 下最新一份）")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（提供 author_identity、advisor 与 scoring.weights 配置）"))
+    parser.add_argument("--output-dir", help=zh("报告输出目录（默认与 fetch 相同：pubmed_results）"))
+    parser.add_argument("--papers-json", help=zh("papers_*.json 路径（默认取 output-dir 下最新一份）"))
     parser.add_argument("--citations-json",
-                        help="citations_*.json 路径（默认取 output-dir 下最新一份；没有就跳过影响力段落并说明原因）")
+                        help=zh("citations_*.json 路径（默认取 output-dir 下最新一份；没有就跳过影响力段落并说明原因）"))
     parser.add_argument("--no-citations", action="store_true",
-                        help="不读引用数文件。第 15 节会写明是这个开关关掉的，而不是没抓到数据")
-    parser.add_argument("--pi-name", help="目标 PI 名（默认取 config 的 author_name）")
+                        help=zh("不读引用数文件。第 15 节会写明是这个开关关掉的，而不是没抓到数据"))
+    parser.add_argument("--pi-name", help=zh("目标 PI 名（默认取 config 的 author_name）"))
     external = parser.add_argument_group(
-        "手工补的外部对照表",
-        "三张表都不联网抓，本工具也不带爬虫：分区表是有版权的商业产品，学位论文库有反爬，"
-        "学生评价散在论坛和评价站上、同样不允许自动采集。"
-        "工具只负责定 schema、吐待查清单、join、并把来源和日期印在报告里；查表是人干的。"
-        "不给表也不会报错，报告会写明「未提供对照表」和补表的命令，而不是留一列空白。",
+        zh("手工补的外部对照表"),
+        zh("三张表都不联网抓，本工具也不带爬虫：分区表是有版权的商业产品，学位论文库有反爬，"
+           "学生评价散在论坛和评价站上、同样不允许自动采集。"
+           "工具只负责定 schema、吐待查清单、join、并把来源和日期印在报告里；查表是人干的。"
+           "不给表也不会报错，报告会写明「未提供对照表」和补表的命令，而不是留一列空白。"),
     )
     external.add_argument("--chinese-records", metavar="CSV",
-                          help="中文期刊题录 CSV（知网/万方等自行导出），并入语料。"
-                               "这一张和其余三张不同：它改变语料本身，报告里每个数字都会跟着变——"
-                               "这正是它存在的理由（只查 PubMed 时中文核心期刊完全看不见）。"
-                               "去重只能靠「归一化标题 + 年份」一级，跨源命中一律标为「疑似重复」，"
-                               "三个分母分别印出、不合成一个")
+                          help=zh("中文期刊题录 CSV（知网/万方等自行导出），并入语料。"
+                                  "这一张和其余三张不同：它改变语料本身，报告里每个数字都会跟着变——"
+                                  "这正是它存在的理由（只查 PubMed 时中文核心期刊完全看不见）。"
+                                  "去重只能靠「归一化标题 + 年份」一级，跨源命中一律标为「疑似重复」，"
+                                  "三个分母分别印出、不合成一个"))
     external.add_argument("--journal-table", metavar="CSV",
-                          help="期刊指标表 CSV（ISSN/刊名/影响因子/JCR分区/中科院大类小类/"
-                               "版本来源/数据获取日期/是否预警）。空白模板用 journal-worklist 生成。"
-                               "版本来源与数据获取日期是必需列——缺了以后无法追溯某个分区是哪一版")
+                          help=zh("期刊指标表 CSV（ISSN/刊名/影响因子/JCR分区/中科院大类小类/"
+                                  "版本来源/数据获取日期/是否预警）。空白模板用 journal-worklist 生成。"
+                                  "版本来源与数据获取日期是必需列——缺了以后无法追溯某个分区是哪一版"))
     # Not in the `external` group: it is not hand-filled. It is a dated file the
     # `journal-risk` verb wrote from three open APIs, so it belongs with
     # --citations-json, which is the other flag of exactly that kind.
     parser.add_argument("--journal-risk-json",
-                        help="journal_risk_*.json 路径（默认取 output-dir 下最新一份）。"
-                             "第 18 节会按 ISSN 把 DOAJ 收录状态与 Crossref 元数据完整度"
-                             "并到期刊表旁边，只列事实与来源日期，不给等级也不下结论")
+                        help=zh("journal_risk_*.json 路径（默认取 output-dir 下最新一份）。"
+                                "第 18 节会按 ISSN 把 DOAJ 收录状态与 Crossref 元数据完整度"
+                                "并到期刊表旁边，只列事实与来源日期，不给等级也不下结论"))
     parser.add_argument("--no-journal-risk", action="store_true",
-                        help="不读风险信号文件。第 18 节会写明是这个开关关掉的，而不是没采到")
+                        help=zh("不读风险信号文件。第 18 节会写明是这个开关关掉的，而不是没采到"))
     external.add_argument("--thesis-roster", metavar="CSV",
-                          help="学位论文名单 CSV（导师姓名/学生姓名/学位类型/毕业年/库来源/导出日期）。"
-                               "这是唯一能数出「毕业了但一篇 PubMed 都没有」的那批人的来源。"
-                               "建议加一列 学生姓名拼音，否则中文名单与英文署名根本对不上")
+                          help=zh("学位论文名单 CSV（导师姓名/学生姓名/学位类型/毕业年/库来源/导出日期）。"
+                                  "这是唯一能数出「毕业了但一篇 PubMed 都没有」的那批人的来源。"
+                                  "建议加一列 学生姓名拼音，否则中文名单与英文署名根本对不上"))
     external.add_argument("--evaluation-table", metavar="CSV",
-                          help="学生评价 CSV（导师姓名/评价来源/数据获取日期/评价内容或维度评分，"
-                               "可选 学生身份、评价年份、原文链接）。第 20 节按原样列出每一条并注明出处，"
-                               "不做情感分析、不汇总、不打分，也不进综合分；评价来源与数据获取日期是必需列")
+                          help=zh("学生评价 CSV（导师姓名/评价来源/数据获取日期/评价内容或维度评分，"
+                                  "可选 学生身份、评价年份、原文链接）。第 20 节按原样列出每一条并注明出处，"
+                                  "不做情感分析、不汇总、不打分，也不进综合分；评价来源与数据获取日期是必需列"))
     delivery = parser.add_argument_group(
-        "导出",
-        "HTML 报告始终生成，这一组只加副本。PDF 走本机已装的转换器"
-        "（wkhtmltopdf / Chrome 无头 / weasyprint / soffice），本包不带 PDF 引擎、"
-        "也不为此新增任何依赖；一个都没装就打印怎么装，HTML 输出一个字节都不变。",
+        zh("导出"),
+        zh("HTML 报告始终生成，这一组只加副本。PDF 走本机已装的转换器"
+           "（wkhtmltopdf / Chrome 无头 / weasyprint / soffice），本包不带 PDF 引擎、"
+           "也不为此新增任何依赖；一个都没装就打印怎么装，HTML 输出一个字节都不变。"),
     )
     delivery.add_argument("--pdf", action="store_true",
-                          help="把 HTML 报告转一份 PDF 放在旁边。没有可用转换器时不报错，"
-                               "只打印装哪一个的说明")
+                          help=zh("把 HTML 报告转一份 PDF 放在旁边。没有可用转换器时不报错，"
+                                  "只打印装哪一个的说明"))
     delivery.add_argument("--pdf-converter",
                           choices=["wkhtmltopdf", "chrome", "weasyprint", "soffice"],
-                          help="指定优先使用哪个转换器（默认按上面的顺序取第一个找得到的）")
+                          help=zh("指定优先使用哪个转换器（默认按上面的顺序取第一个找得到的）"))
     delivery.add_argument("--pdf-converter-path", metavar="EXE",
-                          help="转换器的可执行文件全路径。装了但不在 PATH 上时用这个"
-                               "（Windows 上的 Chrome 与 LibreOffice 通常都不在 PATH）")
+                          help=zh("转换器的可执行文件全路径。装了但不在 PATH 上时用这个"
+                                  "（Windows 上的 Chrome 与 LibreOffice 通常都不在 PATH）"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_journal_worklist_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor journal-worklist",
-        description="扫语料，吐出「本语料实际用到的刊」待查清单 CSV。不联网，不抓任何一页。",
-        epilog="全球两万多本刊逐本查是几百小时；一份五年语料只用到二十来本。清单按篇数从多到少排，"
-               "先查最值钱的。填的时候注意：LetPub 检索结果列表页默认显示的是民间版分区，"
-               "要官方版得点进详情页；科研通 ablesci 把官方版与新锐版分开标注，可交叉验证；"
-               "Clarivate MJL 免费但只有 SCIE/SSCI 收录状态，没有影响因子也没有分区。"
-               "同一本刊查到两版就写两行，各标各的版本来源，不要挑一个填。"
-               "填完用 profile --journal-table 传回来即可，查过的刊留在表里，下一份语料自动复用。",
+        description=zh("扫语料，吐出「本语料实际用到的刊」待查清单 CSV。不联网，不抓任何一页。"),
+        epilog=zh("全球两万多本刊逐本查是几百小时；一份五年语料只用到二十来本。清单按篇数从多到少排，"
+                  "先查最值钱的。填的时候注意：LetPub 检索结果列表页默认显示的是民间版分区，"
+                  "要官方版得点进详情页；科研通 ablesci 把官方版与新锐版分开标注，可交叉验证；"
+                  "Clarivate MJL 免费但只有 SCIE/SSCI 收录状态，没有影响因子也没有分区。"
+                  "同一本刊查到两版就写两行，各标各的版本来源，不要挑一个填。"
+                  "填完用 profile --journal-table 传回来即可，查过的刊留在表里，下一份语料自动复用。"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（默认自动读取 config.json）")
-    parser.add_argument("--output-dir", help="语料所在目录，也是清单的写入目录（默认 pubmed_results）")
-    parser.add_argument("--papers-json", help="papers_*.json 路径（默认取 output-dir 下最新一份）")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
+    parser.add_argument("--output-dir", help=zh("语料所在目录，也是清单的写入目录（默认 pubmed_results）"))
+    parser.add_argument("--papers-json", help=zh("papers_*.json 路径（默认取 output-dir 下最新一份）"))
     parser.add_argument("--out", metavar="CSV",
-                        help="清单写到哪（默认 output-dir/journal_worklist_<时间戳>.csv）")
+                        help=zh("清单写到哪（默认 output-dir/journal_worklist_<时间戳>.csv）"))
     parser.add_argument("--risk-json", nargs="?", const="", metavar="PATH",
-                        help="把 journal-risk 采到的公开风险信号预填进清单的「风险信号」列"
-                             "（不带值则取 output-dir 下最新一份 journal_risk_*.json）。"
-                             "只填信号名与采集日期，完整陈述在报告第 18 节；"
-                             "本命令自己仍然不联网")
+                        help=zh("把 journal-risk 采到的公开风险信号预填进清单的「风险信号」列"
+                                "（不带值则取 output-dir 下最新一份 journal_risk_*.json）。"
+                                "只填信号名与采集日期，完整陈述在报告第 18 节；"
+                                "本命令自己仍然不联网"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_journal_risk_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor journal-risk",
-        description="给本语料用到的刊采集公开风险信号，写 journal_risk_<时间戳>.json。"
-                    "只报事实，不下结论——不产出任何等级、评分、颜色或「掠夺性」判定。",
-        epilog="三个免密钥公开接口：DOAJ 收录状态、Crossref 元数据完整度、OpenAlex 刊记录。"
-               "三个都查，不是先命中者胜——它们回答的是不同问题且经常互相矛盾，矛盾照原样并列印出。"
-               "每条信号都带来源接口与获取日期。注意两件事：未被 DOAJ 收录不是问题（DOAJ 只收 OA 刊，"
-               "订阅刊天生不在里面）；Crossref 某项元数据为 0 也不是问题（Journal of Hepatology "
-               "的 abstracts-backfile 就是 0）。中科院预警名单没有开放接口，不抓，"
-               "继续走期刊表里手填的 是否预警 列。",
+        description=zh("给本语料用到的刊采集公开风险信号，写 journal_risk_<时间戳>.json。"
+                       "只报事实，不下结论——不产出任何等级、评分、颜色或「掠夺性」判定。"),
+        epilog=zh("三个免密钥公开接口：DOAJ 收录状态、Crossref 元数据完整度、OpenAlex 刊记录。"
+                  "三个都查，不是先命中者胜——它们回答的是不同问题且经常互相矛盾，矛盾照原样并列印出。"
+                  "每条信号都带来源接口与获取日期。注意两件事：未被 DOAJ 收录不是问题（DOAJ 只收 OA 刊，"
+                  "订阅刊天生不在里面）；Crossref 某项元数据为 0 也不是问题（Journal of Hepatology "
+                  "的 abstracts-backfile 就是 0）。中科院预警名单没有开放接口，不抓，"
+                  "继续走期刊表里手填的 是否预警 列。"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（默认自动读取 config.json）")
-    parser.add_argument("--output-dir", help="语料所在目录，也是风险信号文件的写入目录（默认 pubmed_results）")
-    parser.add_argument("--papers-json", help="papers_*.json 路径（默认取 output-dir 下最新一份）")
-    parser.add_argument("--email", help="Crossref/OpenAlex 的 mailto（不是密钥，只换一条更宽松的限速通道；"
-                                        "不会写进风险信号文件，也不会印进报告）")
-    parser.add_argument("--max-workers", type=int, help="并发采集线程数（默认取 config 的 max_workers）")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
+    parser.add_argument("--output-dir", help=zh("语料所在目录，也是风险信号文件的写入目录（默认 pubmed_results）"))
+    parser.add_argument("--papers-json", help=zh("papers_*.json 路径（默认取 output-dir 下最新一份）"))
+    parser.add_argument("--email", help=zh("Crossref/OpenAlex 的 mailto（不是密钥，只换一条更宽松的限速通道；"
+                                           "不会写进风险信号文件，也不会印进报告）"))
+    parser.add_argument("--max-workers", type=int, help=zh("并发采集线程数（默认取 config 的 max_workers）"))
     parser.add_argument("--max-age-days", type=int, default=0, metavar="N",
-                        help="沿用上一份 journal_risk_*.json 里 N 天内采到的信号，只补采其余的。"
-                             "默认 0 = 全部重采。沿用的记录保留它自己的采集时间；"
-                             "上次三源都没应答的不沿用")
+                        help=zh("沿用上一份 journal_risk_*.json 里 N 天内采到的信号，只补采其余的。"
+                                "默认 0 = 全部重采。沿用的记录保留它自己的采集时间；"
+                                "上次三源都没应答的不沿用"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_cite_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor cite",
-        description="给已有语料抓引用数：读 output-dir 下最新 papers_*.json，"
-                    "写 citations_<时间戳>.json。papers_*.json 一个字节都不动。",
-        epilog="三级来源 OpenAlex → Semantic Scholar → Europe PMC，都不需要密钥，"
-               "先命中者胜，命中来源逐条记录。引用数是随时间变化的量，所以单独成文件、"
-               "每条自带抓取时间，绝不并回语料——否则一份能放几年的语料会被一个下个月就过期的"
-               "数字拖着一起失效。输出按语料顺序排列，不按引用数排序。",
+        description=zh("给已有语料抓引用数：读 output-dir 下最新 papers_*.json，"
+                       "写 citations_<时间戳>.json。papers_*.json 一个字节都不动。"),
+        epilog=zh("三级来源 OpenAlex → Semantic Scholar → Europe PMC，都不需要密钥，"
+                  "先命中者胜，命中来源逐条记录。引用数是随时间变化的量，所以单独成文件、"
+                  "每条自带抓取时间，绝不并回语料——否则一份能放几年的语料会被一个下个月就过期的"
+                  "数字拖着一起失效。输出按语料顺序排列，不按引用数排序。"),
     )
-    parser.add_argument("--config", help="JSON 配置文件路径（默认自动读取 config.json）")
-    parser.add_argument("--output-dir", help="语料所在目录，也是引用数文件的写入目录（默认 pubmed_results）")
-    parser.add_argument("--papers-json", help="papers_*.json 路径（默认取 output-dir 下最新一份）")
-    parser.add_argument("--email", help="OpenAlex 的 mailto（不是密钥，只是换一条更宽松的限速通道）")
-    parser.add_argument("--max-workers", type=int, help="并发抓取线程数（默认取 config 的 max_workers）")
+    parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
+    parser.add_argument("--output-dir", help=zh("语料所在目录，也是引用数文件的写入目录（默认 pubmed_results）"))
+    parser.add_argument("--papers-json", help=zh("papers_*.json 路径（默认取 output-dir 下最新一份）"))
+    parser.add_argument("--email", help=zh("OpenAlex 的 mailto（不是密钥，只是换一条更宽松的限速通道）"))
+    parser.add_argument("--max-workers", type=int, help=zh("并发抓取线程数（默认取 config 的 max_workers）"))
     # Accepted so a wrapper that passes the same flags to every subcommand does
     # not fail here, and refused a silent role: none of the three citation
     # sources takes a key, so this value is not sent anywhere and cmd_cite says
     # so out loud when it is supplied. A flag that looks like it did something
     # is worse than a flag that is not offered.
-    parser.add_argument("--api-key", help="接受但不使用：三个引用数来源都不需要密钥，给了也不会被发出去")
+    parser.add_argument("--api-key", help=zh("接受但不使用：三个引用数来源都不需要密钥，给了也不会被发出去"))
     # Default 0 rather than a comfortable 30: a citation count moves every week,
     # and quietly serving a month-old one would undercut the reason this file is
     # dated at all. Reuse is a thing you ask for. When there is a recent file to
     # reuse and this was not passed, cmd_cite says the flag exists.
     parser.add_argument("--max-age-days", type=int, default=0, metavar="N",
-                        help="沿用上一份 citations_*.json 里 N 天内抓到的计数，只补抓其余的。"
-                             "默认 0 = 全部重抓。沿用的记录保留它自己的抓取时间，不会被记成今天；"
-                             "上次三源皆未命中的不沿用，因为覆盖率会随来源收录而自行变好")
+                        help=zh("沿用上一份 citations_*.json 里 N 天内抓到的计数，只补抓其余的。"
+                                "默认 0 = 全部重抓。沿用的记录保留它自己的抓取时间，不会被记成今天；"
+                                "上次三源皆未命中的不沿用，因为覆盖率会随来源收录而自行变好"))
     # Off by default because it costs one extra request per paper plus one per
     # topic-year, against an API that asks for nothing in return. The counts are
     # the answer on their own; the cell is what makes a count readable.
     parser.add_argument("--percentile", action="store_true",
-                        help="再问一次 OpenAlex：每篇的引用数在「同领域同年」的全部论文里排在什么位置。"
-                             "写成单独的 impact_reference_*.json，不并进语料。"
-                             "定位不到的论文明确标出原因，绝不当成低百分位")
+                        help=zh("再问一次 OpenAlex：每篇的引用数在「同领域同年」的全部论文里排在什么位置。"
+                                "写成单独的 impact_reference_*.json，不并进语料。"
+                                "定位不到的论文明确标出原因，绝不当成低百分位"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def parse_diff_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor diff",
-        description="比较同一位导师的两份语料：新增了什么、谁第一次出现、一作名额落在谁头上",
-        epilog="第一个目录是旧的，第二个是新的。**先读窗口那一段再读任何计数**："
-               "如果两次检索的年份范围不一样，「新增 7 篇」很可能只是这次多查了两年，"
-               "那不是新增，是口径变了，本命令会显著地说出来。"
-               "一条记录只在其中一份里，本命令只报这个事实，不说它为什么不在——"
-               "撤稿、检索式不同、身份证据不同、书目库当天的应答都可能，工具分不出来，也不猜。",
+        description=zh("比较同一位导师的两份语料：新增了什么、谁第一次出现、一作名额落在谁头上"),
+        epilog=zh("第一个目录是旧的，第二个是新的。**先读窗口那一段再读任何计数**："
+                  "如果两次检索的年份范围不一样，「新增 7 篇」很可能只是这次多查了两年，"
+                  "那不是新增，是口径变了，本命令会显著地说出来。"
+                  "一条记录只在其中一份里，本命令只报这个事实，不说它为什么不在——"
+                  "撤稿、检索式不同、身份证据不同、书目库当天的应答都可能，工具分不出来，也不猜。"),
     )
-    parser.add_argument("old_dir", metavar="OLD_DIR", help="较早那份语料所在目录")
-    parser.add_argument("new_dir", metavar="NEW_DIR", help="较新那份语料所在目录")
-    parser.add_argument("--out", metavar="JSON", help="把完整差异写成 JSON（默认只打印摘要）")
+    parser.add_argument("old_dir", metavar="OLD_DIR", help=zh("较早那份语料所在目录"))
+    parser.add_argument("new_dir", metavar="NEW_DIR", help=zh("较新那份语料所在目录"))
+    parser.add_argument("--out", metavar="JSON", help=zh("把完整差异写成 JSON（默认只打印摘要）"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def cmd_diff(argv: list[str]):
@@ -438,29 +445,29 @@ def cmd_diff(argv: list[str]):
 def parse_compare_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         prog="check-your-advisor compare",
-        description="把 N 份语料并排放在一页上：名次、综合分、星级、分项值，以及相对第一列的分项差值",
-        epilog="默认按综合分从高到低排名次，每个名次都带「几份里的第几」——两份里的第一和九份里的第一"
-               "不是一回事。也可以 --order-by label 回到按语料名排。星级旁边还有一个字母档，"
-               "两者是同一个分数在同一组边界上的两种拼法。仍然不给「在你加载的这几份语料里的百分位」"
-               "——那几份是你自己选的，加一份删一份位置就变，这个量算不出来。"
-               "引用数的百分位是另一回事，见 cite --percentile。"
-               "所有语料必须使用同一张权重表，否则拒绝出图。",
+        description=zh("把 N 份语料并排放在一页上：名次、综合分、星级、分项值，以及相对第一列的分项差值"),
+        epilog=zh("默认按综合分从高到低排名次，每个名次都带「几份里的第几」——两份里的第一和九份里的第一"
+                  "不是一回事。也可以 --order-by label 回到按语料名排。星级旁边还有一个字母档，"
+                  "两者是同一个分数在同一组边界上的两种拼法。仍然不给「在你加载的这几份语料里的百分位」"
+                  "——那几份是你自己选的，加一份删一份位置就变，这个量算不出来。"
+                  "引用数的百分位是另一回事，见 cite --percentile。"
+                  "所有语料必须使用同一张权重表，否则拒绝出图。"),
     )
     parser.add_argument("output_dirs", nargs="+", metavar="OUTPUT_DIR",
-                        help="要并排的语料目录，每个目录下要有 papers_*.json")
+                        help=zh("要并排的语料目录，每个目录下要有 papers_*.json"))
     parser.add_argument("--config", action="append", dest="configs", metavar="PATH",
-                        help="JSON 配置文件路径。给一个则全部共用；给多个则按语料目录顺序一一对应")
+                        help=zh("JSON 配置文件路径。给一个则全部共用；给多个则按语料目录顺序一一对应"))
     parser.add_argument("--pi-name", action="append", dest="pi_names", metavar="NAME",
-                        help="目标 PI 名，规则同 --config：给一个全用，给多个按顺序对应")
+                        help=zh("目标 PI 名，规则同 --config：给一个全用，给多个按顺序对应"))
     parser.add_argument("--output-dir", dest="report_dir", default=".",
-                        help="对比结果的写入目录（默认当前目录；这是输出，不是被比较的语料）")
+                        help=zh("对比结果的写入目录（默认当前目录；这是输出，不是被比较的语料）"))
     parser.add_argument("--order-by", choices=["score", "label"], default="score",
-                        help="列的排序依据：score=按综合分从高到低（默认），label=按语料名字典序。"
-                             "无论哪种，名次都照算照印——名次是这组语料的属性，不是列顺序的属性")
+                        help=zh("列的排序依据：score=按综合分从高到低（默认），label=按语料名字典序。"
+                                "无论哪种，名次都照算照印——名次是这组语料的属性，不是列顺序的属性"))
     parser.add_argument("--no-citations", action="store_true",
-                        help="所有语料都不读引用数文件，两个引用数分项会一并标为无数据")
+                        help=zh("所有语料都不读引用数文件，两个引用数分项会一并标为无数据"))
     parser.add_argument("--log-level", choices=["DEBUG", "INFO", "WARNING", "ERROR"], default="INFO")
-    return parser.parse_args(argv)
+    return _add_lang(parser).parse_args(argv)
 
 
 def _has_identity_evidence(identity: dict, merge_works: bool = False) -> bool:
@@ -559,7 +566,9 @@ def _split_subcommand(argv: list[str] | None) -> tuple[str, list[str]]:
 def _force_utf8_stdio() -> None:
     """Make Chinese output survive a stdout that cannot encode it.
 
-    Every message this tool prints is Chinese. On Windows a real console renders
+    Every message this tool prints is Chinese on a Chinese system or under
+    `--lang zh`, and some are on any system (a CSV column name, a Chinese title
+    quoted back). On Windows a real console renders
     that through the console API whatever the code page is — but a *redirect*
     (`> log.txt`, a pipe, or capture by a parent process) falls back to the
     locale encoding instead, and cp1252 cannot encode a single Chinese
@@ -583,9 +592,69 @@ def _force_utf8_stdio() -> None:
             pass
 
 
+def _add_lang(parser: argparse.ArgumentParser) -> argparse.ArgumentParser:
+    """`--lang` on every subcommand, so `--help` lists it wherever a reader looks.
+
+    The value is read by `main()` before any parser runs — the help text itself is
+    printed in it — so the parsed attribute is never consulted.
+    """
+    parser.add_argument(
+        "--lang", choices=i18n.LANGUAGES, default=None,
+        help=zh("日志、提示与帮助的语言（zh 或 en）。默认依次看 $CHECK_YOUR_ADVISOR_LANG 和系统语言；"
+                "报告总是中英文各写一份，不受它影响。"),
+    )
+    return parser
+
+
+_argparse_translated = False
+
+
+class _Columns(str):
+    """A string whose `len()` is the width it prints at: two columns per Chinese character.
+
+    argparse indents the wrapped lines of a usage block by `len()` of its prefix,
+    which counts `用法：` as three columns where a terminal draws six, so every
+    continuation line started three columns left of the first.
+    """
+
+    def __len__(self) -> int:
+        return sum(2 if unicodedata.east_asian_width(ch) in "WF" else 1 for ch in str(self))
+
+
+def _translate_argparse() -> None:
+    """argparse's own words — `usage:`, the headings, `-h`'s help, its errors — in
+    the message language too.
+
+    argparse fetches them through its module-level `_` (gettext) as it prints,
+    not through `zh()`, so without this a Chinese help page opens with `usage:`
+    and a mistyped flag on a Chinese run is answered in English. The replacement
+    asks for the language on every call, so an English run in the same process
+    still gets argparse's own text, and it falls back to that text for anything
+    `ARGPARSE_ZH` does not hold. Installed by `main()`, never at import:
+    importing a library must not change how somebody else's parser talks.
+    """
+    global _argparse_translated
+    original = getattr(argparse, "_", None)
+    if _argparse_translated or not callable(original):
+        return
+
+    def gettext(message: str) -> str:
+        if i18n.language() == "zh" and message in ARGPARSE_ZH:
+            text = ARGPARSE_ZH[message]
+            return _Columns(text) if message == "usage: " else text
+        return original(message)
+
+    argparse._ = gettext
+    _argparse_translated = True
+
+
 def main(argv: list[str] | None = None):
     _force_utf8_stdio()
     args = sys.argv[1:] if argv is None else list(argv)
+    # First, because everything after this prints in it, the help text included:
+    # `--lang`, then $CHECK_YOUR_ADVISOR_LANG, then the system locale.
+    i18n.set_language(i18n.resolve_language(args)[0])
+    _translate_argparse()
     # Ahead of the subcommand split, because with no subcommand every argument
     # goes to the `fetch` parser, which answered `--version` with a usage error
     # and exit 2 — so nothing installed could say which release it was.
@@ -1059,7 +1128,7 @@ def cmd_journal_risk(argv: list[str]):
         # "not looked up" must never be mistaken for "looked up, nothing found".
         logger.warning("%d 本刊语料里没有 ISSN，三个接口都只认 ISSN，因此查不了（不是查了没结果）: %s",
                        len(scope["journals_without_issn"]),
-                       "、".join(scope["journals_without_issn"][:8])
+                       zh("、").join(scope["journals_without_issn"][:8])
                        + ("…" if len(scope["journals_without_issn"]) > 8 else ""))
     if not cfg.get("email"):
         logger.info("未配置 email，Crossref/OpenAlex 将按匿名池请求（可用，只是限速更紧）。")
@@ -1438,7 +1507,7 @@ def _load_citations(
     error — silence and refusal are both wrong here, so it does neither.
     """
     if disabled:
-        return None, "--no-citations was given on the command line, so no citation file was read."
+        return None, lazy_en("--no-citations was given on the command line, so no citation file was read.")
 
     from check_your_advisor.citations import (
         find_latest_citations_json,
@@ -1449,7 +1518,7 @@ def _load_citations(
     if path:
         if not os.path.exists(path):
             logger.error("--citations-json 指向的文件不存在: %s", path)
-            return None, f"--citations-json named {path}, which does not exist."
+            return None, lazy_en("--citations-json named {path}, which does not exist.", path=path)
     else:
         path = find_latest_citations_json(output_dir)
         if not path:
@@ -1459,16 +1528,17 @@ def _load_citations(
                 output_dir, output_dir,
             )
             return None, (
-                f"no citations_*.json was found in {output_dir}. Run "
-                f"`check-your-advisor cite --output-dir {output_dir}` to fetch counts for this "
-                "corpus; nothing else in this report depends on it."
+                lazy_en("no citations_*.json was found in {output_dir}. Run `check-your-advisor "
+                        "cite --output-dir {output_dir}` to fetch counts for this corpus; nothing "
+                        "else in this report depends on it.",
+                        output_dir=output_dir)
             )
 
     try:
         payload = load_citations_json(path)
     except (OSError, ValueError) as exc:
         logger.error("引用数文件无法读取，报告将跳过影响力段落: %s (%s)", path, exc)
-        return None, f"{path} could not be read as a citations file: {exc}"
+        return None, lazy_en("{path} could not be read as a citations file: {exc}", path=path, exc=i18n.reason(exc))
 
     source = payload.get("source_papers_json") or ""
     if source and source != os.path.basename(papers_json):
@@ -1517,13 +1587,13 @@ def _load_journal_table(
     resolved = _resolve_table_path(path, cfg, "journals", "table_path")
     if not resolved:
         return None, (
-            "no journal metric table was supplied. Run `check-your-advisor journal-worklist` to "
-            "write the journals this corpus actually uses into a CSV, fill in the metric columns "
-            "from LetPub or ablesci, and pass it back with --journal-table."
+            lazy_en("no journal metric table was supplied. Run `check-your-advisor journal-worklist` to "
+                    "write the journals this corpus actually uses into a CSV, fill in the metric columns "
+                    "from LetPub or ablesci, and pass it back with --journal-table.")
         )
     if not os.path.exists(resolved):
         logger.error("--journal-table 指向的文件不存在: %s", resolved)
-        return None, f"--journal-table named {resolved}, which does not exist."
+        return None, lazy_en("--journal-table named {resolved}, which does not exist.", resolved=resolved)
 
     from check_your_advisor.journals import JournalTableError, load_journal_table
 
@@ -1531,14 +1601,14 @@ def _load_journal_table(
         table = load_journal_table(resolved)
     except (OSError, JournalTableError, ValueError) as exc:
         logger.error("期刊指标表无法读取，第 18 节将写明原因: %s (%s)", resolved, exc)
-        return None, f"{resolved} could not be read as a journal table: {exc}"
+        return None, lazy_en("{resolved} could not be read as a journal table: {exc}", resolved=resolved, exc=i18n.reason(exc))
 
     logger.info("期刊指标表: %s（%d 行 / %d 本刊，编码 %s）",
                 resolved, table["row_count"], table["journal_count"], table["encoding"])
     editions = table["editions"] or {}
     logger.info("版本来源分布: %s；数据获取日期: %s",
-                "、".join(f"{name} {count}" for name, count in editions.items()) or "无",
-                " 到 ".join(table["retrieved_on_range"] or []) or "未记录")
+                zh("、").join(f"{name} {count}" for name, count in editions.items()) or "无",
+                zh(" 到 ").join(table["retrieved_on_range"] or []) or "未记录")
     if table["rows_without_edition"]:
         logger.warning(
             "有 %d 行没标版本来源。这些分区数字过后无法判断是官方版、新锐版还是民间版——"
@@ -1569,17 +1639,18 @@ def _load_impact_reference(
     path = find_latest_impact_reference_json(output_dir)
     if not path:
         return None, (
-            f"no impact_reference_*.json was found in {output_dir}. Run "
-            f"`check-your-advisor cite --percentile --output-dir {output_dir}` to ask OpenAlex "
-            "where each citation count falls among the works sharing its topic and year; "
-            "nothing else in this report depends on it."
+            lazy_en("no impact_reference_*.json was found in {output_dir}. Run "
+                    "`check-your-advisor cite --percentile --output-dir {output_dir}` to ask "
+                    "OpenAlex where each citation count falls among the works sharing its "
+                    "topic and year; nothing else in this report depends on it.",
+                    output_dir=output_dir)
         )
 
     try:
         payload = load_impact_reference_json(path)
     except (OSError, ValueError) as exc:
         logger.error("引用百分位文件无法读取，第 15 节将写明原因: %s (%s)", path, exc)
-        return None, f"{path} could not be read as an impact reference file: {exc}"
+        return None, lazy_en("{path} could not be read as an impact reference file: {exc}", path=path, exc=i18n.reason(exc))
 
     denominator = payload.get("denominator") or {}
     logger.info("引用百分位: %s（%s/%s 篇定位到参照分布，采集时间 %s）", path,
@@ -1606,8 +1677,8 @@ def _load_journal_risk(
     nothing else, and Section 18 itself still renders from the hand-filled table.
     """
     if disabled:
-        return None, ("--no-journal-risk was given on the command line, so no risk signal file "
-                      "was read.")
+        return None, (lazy_en("--no-journal-risk was given on the command line, so no risk signal file "
+                              "was read."))
 
     from check_your_advisor.journal_risk import find_latest_risk_json, load_risk_json
 
@@ -1615,22 +1686,23 @@ def _load_journal_risk(
     if path:
         if not os.path.exists(path):
             logger.error("--journal-risk-json 指向的文件不存在: %s", path)
-            return None, f"--journal-risk-json named {path}, which does not exist."
+            return None, lazy_en("--journal-risk-json named {path}, which does not exist.", path=path)
     else:
         path = find_latest_risk_json(output_dir)
         if not path:
             return None, (
-                f"no journal_risk_*.json was found in {output_dir}. Run "
-                f"`check-your-advisor journal-risk --output-dir {output_dir}` to collect DOAJ "
-                "indexing status and Crossref metadata coverage for the journals this corpus "
-                "uses; nothing else in this report depends on it."
+                lazy_en("no journal_risk_*.json was found in {output_dir}. Run `check-your-advisor "
+                        "journal-risk --output-dir {output_dir}` to collect DOAJ indexing status "
+                        "and Crossref metadata coverage for the journals this corpus uses; nothing "
+                        "else in this report depends on it.",
+                        output_dir=output_dir)
             )
 
     try:
         payload = load_risk_json(path)
     except (OSError, ValueError) as exc:
         logger.error("期刊风险信号文件无法读取，第 18 节的信号块将写明原因: %s (%s)", path, exc)
-        return None, f"{path} could not be read as a journal risk file: {exc}"
+        return None, lazy_en("{path} could not be read as a journal risk file: {exc}", path=path, exc=i18n.reason(exc))
 
     denominator = payload.get("denominator") or {}
     logger.info("期刊风险信号: %s（%s/%s 本刊有信号，采集时间 %s）", path,
@@ -1654,13 +1726,13 @@ def _load_thesis_roster(
     resolved = _resolve_table_path(path, cfg, "theses", "roster_path")
     if not resolved:
         return None, (
-            "no degree-thesis roster was supplied, so no graduate who never published is counted "
-            "anywhere in this report. Export this advisor's supervised theses from CNKI or 万方 "
-            "and pass the CSV with --thesis-roster."
+            lazy_en("no degree-thesis roster was supplied, so no graduate who never published is counted "
+                    "anywhere in this report. Export this advisor's supervised theses from CNKI or 万方 "
+                    "and pass the CSV with --thesis-roster.")
         )
     if not os.path.exists(resolved):
         logger.error("--thesis-roster 指向的文件不存在: %s", resolved)
-        return None, f"--thesis-roster named {resolved}, which does not exist."
+        return None, lazy_en("--thesis-roster named {resolved}, which does not exist.", resolved=resolved)
 
     from check_your_advisor.theses import load_thesis_roster
 
@@ -1668,14 +1740,14 @@ def _load_thesis_roster(
         roster = load_thesis_roster(resolved)
     except (OSError, ValueError) as exc:
         logger.error("学位论文名单无法读取，第 17 节将写明原因: %s (%s)", resolved, exc)
-        return None, f"{resolved} could not be read as a thesis roster: {exc}"
+        return None, lazy_en("{resolved} could not be read as a thesis roster: {exc}", resolved=resolved, exc=i18n.reason(exc))
 
     logger.info("学位论文名单: %s（%d 行可用 / 共读入 %d 行，编码 %s）",
                 resolved, roster["denominator"], roster["rows_read"], roster["encoding"])
     logger.info("库来源: %s；导出日期: %s",
-                "、".join(f"{name} {count}" for name, count in (roster["source_dbs"] or {}).items())
+                zh("、").join(f"{name} {count}" for name, count in (roster["source_dbs"] or {}).items())
                 or "未记录",
-                "、".join(roster["export_dates"]) or "未记录")
+                zh("、").join(roster["export_dates"]) or "未记录")
     if "student_latin" in (roster["columns_missing_optional"] or []):
         logger.warning(
             "名单里没有「学生姓名拼音」列。中文姓名和 PubMed 的英文署名之间没有任何标准库能换算，"
@@ -1706,14 +1778,14 @@ def _load_evaluation_table(
     resolved = _resolve_table_path(path, cfg, "evaluations", "table_path")
     if not resolved:
         return None, (
-            "no evaluation table was supplied, so no third-party statement about this advisor is "
-            "printed. Collect them by hand from whatever public pages carry them and pass the CSV "
-            "with --evaluation-table. Nothing is fetched for you: this package has no crawler and "
-            "the sites do not permit one."
+            lazy_en("no evaluation table was supplied, so no third-party statement about this advisor is "
+                    "printed. Collect them by hand from whatever public pages carry them and pass the CSV "
+                    "with --evaluation-table. Nothing is fetched for you: this package has no crawler and "
+                    "the sites do not permit one.")
         )
     if not os.path.exists(resolved):
         logger.error("--evaluation-table 指向的文件不存在: %s", resolved)
-        return None, f"--evaluation-table named {resolved}, which does not exist."
+        return None, lazy_en("--evaluation-table named {resolved}, which does not exist.", resolved=resolved)
 
     from check_your_advisor.evaluations import EvaluationTableError, load_evaluation_table
 
@@ -1721,14 +1793,14 @@ def _load_evaluation_table(
         table = load_evaluation_table(resolved)
     except (OSError, EvaluationTableError, ValueError) as exc:
         logger.error("学生评价表无法读取，第 20 节将写明原因: %s (%s)", resolved, exc)
-        return None, f"{resolved} could not be read as an evaluation table: {exc}"
+        return None, lazy_en("{resolved} could not be read as an evaluation table: {exc}", resolved=resolved, exc=i18n.reason(exc))
 
     logger.info("学生评价表: %s（%d 行可用 / 共读入 %d 行，编码 %s）",
                 resolved, table["denominator"], table["rows_read"], table["encoding"])
     logger.info("评价来源: %s；数据获取日期: %s",
-                "、".join(f"{name} {count}" for name, count in (table["sources"] or {}).items())
+                zh("、").join(f"{name} {count}" for name, count in (table["sources"] or {}).items())
                 or "未记录",
-                " 到 ".join(table["retrieved_on_range"] or []) or "未记录")
+                zh(" 到 ").join(table["retrieved_on_range"] or []) or "未记录")
     if table["rows_without_year"]:
         logger.warning(
             "有 %d 行没填评价年份。这些话放不进时间轴——一位导师二十年里不是同一个人，"
@@ -1778,7 +1850,7 @@ def _load_chinese_records(path: str | None, cfg: dict, logger: logging.Logger):
         converted = to_paper_records(table, cfg.get("author_name", ""))
     except (OSError, ChineseRecordError) as exc:
         logger.error("中文题录读不了，本次不并入: %s", exc)
-        return None, f"{path} could not be read as a Chinese bibliography: {exc}"
+        return None, lazy_en("{path} could not be read as a Chinese bibliography: {exc}", path=path, exc=i18n.reason(exc))
 
     counts = converted["counts"]
     logger.info("中文题录: %s（编码 %s，读入 %d 行，产出 %d 条记录）",
@@ -1908,7 +1980,7 @@ def cmd_profile(argv: list[str]):
     logger = logging.getLogger("check_your_advisor.profile")
 
     from check_your_advisor.corpus import find_latest_json
-    from check_your_advisor.profile import resolve_score_weights, write_html, write_report
+    from check_your_advisor.profile import localize, resolve_score_weights, write_html, write_report
 
     json_path = args.papers_json or find_latest_json(output_dir)
     if not json_path or not os.path.exists(json_path):
@@ -1961,11 +2033,20 @@ def cmd_profile(argv: list[str]):
     if report is None:
         return 1
 
-    paths = write_report(report, output_dir)
-    # A refused report draws nothing: every number a figure would carry is wrong by
-    # an unbounded amount once a gate fires, so the page states the gate instead.
-    figures = {} if report["refused"] else _profile_figures(report, logger)
-    html_path = write_html(report, output_dir, figures)
+    # One report per language, from one built report: `localize` rewrites the
+    # sentences and touches no number, so the two cannot disagree about a count.
+    # English first and under the file names every earlier release wrote; the
+    # JSON is written once, beside it.
+    written: dict[str, dict[str, str]] = {}
+    figures: dict[str, dict] = {}
+    for lang in i18n.REPORT_LANGUAGES:
+        view = report if lang == "en" else localize(report, lang)
+        written[lang] = write_report(view, output_dir)
+        # A refused report draws nothing: every number a figure would carry is wrong
+        # by an unbounded amount once a gate fires, so the page states the gate instead.
+        figures = {} if report["refused"] else _profile_figures(view, logger)
+        written[lang]["html"] = write_html(view, output_dir, figures)
+    paths = written["en"]
 
     if report["refused"]:
         gate = report["gate"]
@@ -1980,7 +2061,7 @@ def cmd_profile(argv: list[str]):
                 "报告已完整生成（第 %s 节顶部各挂一行），退出码仍为 1。",
                 item["id"], item["name"], item["message"],
                 item["observed_text"] or "无", item["fix"],
-                "、".join(str(section) for section in item["sections"]),
+                zh("、").join(str(section) for section in item["sections"]),
             )
         prov = report["provenance"]
         logger.info("语料 %d 篇 / 人员 %d 位（严格键 %d、宽松键 %d，两者之差即人员计数的误差范围）",
@@ -2041,7 +2122,7 @@ def cmd_profile(argv: list[str]):
                         "全部是事实陈述，不是等级——未被 DOAJ 收录不等于有问题，"
                         "Crossref 某项为 0 也不等于有问题",
                         risk["journals_checked"], risk["journal_denominator"],
-                        "、".join(f"{name} {count}"
+                        zh("、").join(f"{name} {count}"
                                   for name, count in (risk["signal_counts"] or {}).items())
                         or "无")
         evaluations = report.get("evaluations")
@@ -2058,21 +2139,24 @@ def cmd_profile(argv: list[str]):
                 logger.warning("第 20 节无可印内容：%s", reason)
         else:
             logger.info("第 20 节（学生评价）未提供对照表：%s", report.get("evaluation_note", ""))
-    logger.info("画像报告（主）: %s", html_path)
-    logger.info("画像报告（备）: %s | %s", paths["markdown"], paths["json"])
+    logger.info("画像报告（主，英文）: %s", written["en"]["html"])
+    logger.info("画像报告（主，中文）: %s", written["zh"]["html"])
+    logger.info("画像报告（备）: %s | %s | %s",
+                written["en"]["markdown"], written["zh"]["markdown"], paths["json"])
     if args.pdf:
         # Runs last and on purpose. The HTML above is the deliverable; a PDF is a
         # second copy of that same file, so a machine with no converter loses a
         # convenience and nothing else — which is why this neither gates nor
-        # changes the exit code.
+        # changes the exit code. One PDF per language, beside its own HTML.
         from check_your_advisor.html_to_pdf import convert, describe
 
-        for line in describe(convert(
-            html_path,
-            prefer=args.pdf_converter or "",
-            explicit_path=args.pdf_converter_path or "",
-        )):
-            logger.info("%s", line)
+        for lang in i18n.REPORT_LANGUAGES:
+            for line in describe(convert(
+                written[lang]["html"],
+                prefer=args.pdf_converter or "",
+                explicit_path=args.pdf_converter_path or "",
+            )):
+                logger.info("%s", line)
     return report["exit_code"]
 
 
@@ -2090,8 +2174,8 @@ def _per_corpus(values: list[str] | None, count: int, flag: str) -> list[str | N
     if len(values) == count:
         return list(values)
     raise ValueError(
-        f"{flag} 给了 {len(values)} 个，但语料有 {count} 份——"
-        f"要么给 1 个（全部共用），要么给 {count} 个（按顺序一一对应）"
+        lazy_zh("{flag} 给了 {n_values} 个，但语料有 {count} 份——要么给 1 个（全部共用），要么给 {count} 个（按顺序一一对应）",
+                flag=flag, n_values=len(values), count=count)
     )
 
 
@@ -2104,6 +2188,7 @@ def cmd_compare(argv: list[str]):
     from check_your_advisor.profile import (
         build_comparison,
         resolve_score_weights,
+        localize_comparison,
         write_comparison,
     )
 
@@ -2174,17 +2259,19 @@ def cmd_compare(argv: list[str]):
                 "%s：身份提示 %s —— 这一列的报告和分值都在，但不给名次：可能不止一个人的语料，"
                 "名次是关于一个人的断言",
                 label,
-                "、".join(f"{item['id']} ({item['name']})" for item in report["warnings"]),
+                zh("、").join(f"{item['id']} ({item['name']})" for item in report["warnings"]),
             )
         else:
             score = report.get("score") or {}
             logger.info("%s：语料 %d 篇%s", label,
                         report["provenance"]["corpus_size"],
-                        "，综合分未给出（分项不足）" if score.get("suppressed")
-                        else f"，综合分 {score.get('score', 0.0):.1f}")
+                        zh("，综合分未给出（分项不足）") if score.get("suppressed")
+                        else zh("，综合分 {score:.1f}", score=score.get('score', 0.0)))
 
     comparison = build_comparison(entries, shared, order_by=args.order_by)
     paths = write_comparison(comparison, args.report_dir)
+    # The Chinese page beside the English one; the JSON stays one file.
+    paths_zh = write_comparison(localize_comparison(comparison, "zh"), args.report_dir)
 
     ranking = comparison["ranking"]
     logger.info("列序：%s", comparison["order"])
@@ -2202,7 +2289,8 @@ def cmd_compare(argv: list[str]):
                         "★" * (row["stars"] or 0) + "☆" * (5 - (row["stars"] or 0)),
                         row.get("letter") or "无",
                         row["n_components"],
-                        "，与 " + "、".join(row["tied_with"]) + " 并列" if row["tied_with"] else "")
+                        zh("，与 {names} 并列", names=zh("、").join(row["tied_with"]))
+                        if row["tied_with"] else "")
     for row in ranking["unranked"]:
         logger.warning("%s 没有名次：%s（既不算 0 分，也不排在最后——最后也是一个位置）",
                        row["label"] or "(未命名)", row["reason"])
@@ -2220,7 +2308,7 @@ def cmd_compare(argv: list[str]):
     # percentile.
     logger.info("名次是这几份语料之间的位置，不是任何更大人群里的位置；换一份语料进来，名次就会变。"
                 "字母档就是星级换了个写法，分档边界相同；综合分没有百分位。这里排的是语料，不是人。")
-    logger.info("对比结果: %s | %s", paths["markdown"], paths["json"])
+    logger.info("对比结果: %s | %s | %s", paths["markdown"], paths_zh["markdown"], paths["json"])
     # A refused corpus keeps its row, so the page is still worth reading; the
     # exit code reports that at least one row carries a gate instead of numbers.
     # An identity warning counts the same way, which keeps the exit code exactly

@@ -649,9 +649,9 @@ markdown = report.render_markdown(with_table)
 check_true("the section heading survives into the Markdown",
            any(line.startswith("## 20.") and "Student evaluations" in line
                for line in markdown.splitlines()))
-check_true("...in both languages, since round four made headings bilingual",
+check_true("...in Chinese on the Chinese page, which is a copy of the same report",
            any(line.startswith("## 20.") and "学生评价" in line
-               for line in markdown.splitlines()))
+               for line in report.render_markdown(report.localize(with_table, "zh")).splitlines()))
 check_true("...and each statement with its source",
            "来源 知乎" in markdown and "获取日期 2026-08-20" in markdown)
 

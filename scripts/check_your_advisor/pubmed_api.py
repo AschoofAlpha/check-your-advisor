@@ -17,6 +17,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
+from . import i18n
+
 logger = logging.getLogger("check_your_advisor.pubmed")
 
 BASE_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
@@ -394,7 +396,8 @@ def search_pubmed(
             "只取回 %d / 共 %d 条(上限 max_records=%d，翻页中丢弃重复 PMID %d 个)。"
             "缺的 %d 条没有被检查，报告里的每个计数都是下界——%s",
             len(collected), total, max_records, duplicates, total - len(collected),
-            coverage_remedy(total, max_records, "zh"),
+            # In the language the log is written in; the report asks for its own.
+            coverage_remedy(total, max_records, i18n.language() or "zh"),
         )
     return collected
 

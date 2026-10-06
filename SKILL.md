@@ -199,10 +199,14 @@ Separate commands because the two network-bound steps — harvesting the papers
 and fetching the citation counts — are slow, while the report is instant and
 offline: harvest once, re-read the record many times.
 `harvest` writes `papers_<timestamp>.json`; `profile` reads the most recent one
-in `--output-dir` unless `--papers-json` says otherwise, and writes three files
-from one run: `advisor_profile_<timestamp>.html` (the one to read), plus `.md`
-and `.json` beside it for quoting and for machine consumption. `--pdf` adds a
-fourth, on the same timestamp stem, if the machine has a converter for it.
+in `--output-dir` unless `--papers-json` says otherwise, and writes the report
+twice from one run, once per language: `advisor_profile_<timestamp>.html` (the one
+to read) and `.md` in English, `advisor_profile_<timestamp>.zh-CN.html` and
+`.zh-CN.md` in Chinese, plus one `.json` for machine consumption. Both pages come
+from the same built report, so they carry the same numbers; hand the Chinese one
+to a reader who reads Chinese. `--pdf` adds a PDF beside each HTML, on the same
+stem, if the machine has a converter for it. The command line's own messages
+follow `--lang zh|en`, then `$CHECK_YOUR_ADVISOR_LANG`, then the system locale.
 
 The HTML carries seven figures, every one an inline SVG this package emits
 itself: no matplotlib, no external JavaScript, no webfont, no network reference
@@ -313,8 +317,9 @@ corpus to read — it defaults to the current directory, which is the one flag h
 worth reading twice. `--config` and `--pi-name` are repeatable: give one and
 every corpus uses it, or one per directory in order. `--no-citations` applies to
 every corpus at once and marks both citation components as having no data.
-Output is `advisor_compare_<timestamp>.md` plus a `.json` record; there is no
-HTML page for a comparison.
+Output is `advisor_compare_<timestamp>.md` and its Chinese copy
+`advisor_compare_<timestamp>.zh-CN.md`, plus one `.json` record; there is no HTML
+page for a comparison.
 
 The page carries a rank column, a star column, a letter column — the star band
 relabelled on the same edges, with the letter scale printed under the table —
