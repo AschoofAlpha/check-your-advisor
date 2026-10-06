@@ -2558,7 +2558,7 @@ def _roster_body(roster: dict[str, Any], gantt_path: str | Path | None) -> list[
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for row in roster["rows"]:
-        censoring = ", ".join(
+        censoring = en(", ").join(
             en(label) for label, flag in (("left", row["left_censored"]), ("right", row["right_censored"])) if flag
         ) or en("none")
         lines.append(
@@ -2803,7 +2803,7 @@ def _records_body(result: dict[str, Any]) -> list[str]:
             notes.append(en("PARTIAL"))
         if row["indexing_lag"]:
             notes.append(en("subject to PubMed indexing lag"))
-        suffix = f"  ({'; '.join(notes)})" if notes else ""
+        suffix = en("  ({notes})", notes=en("; ").join(notes)) if notes else ""
         lines.append(en("- {year}: {count}{suffix}", year=row['year'], count=row['count'], suffix=suffix))
 
     # Round four. Rounds one through three refused a fitted slope here, and the
@@ -3391,7 +3391,7 @@ def _cohesion_body(data: dict[str, Any]) -> list[str]:
         span = ""
         if cluster["year_range"]:
             low, high = cluster["year_range"]
-            span = f", {low}" if low == high else f", {low}–{high}"
+            span = en(", {low}", low=low) if low == high else en(", {low}–{high}", low=low, high=high)
         lines.append(en("- cluster {number}: {size} records{span}", number=number, size=cluster['size'], span=span))
         for venue in cluster["journals"][:6]:
             suffix = f" x{venue['count']}" if venue["count"] > 1 else ""

@@ -370,6 +370,22 @@ check("a raw ampersand from PubMed never reaches the page unescaped",
 check_true("a title containing markup is escaped in the titles section",
            "&lt;b&gt;markup&lt;/b&gt;" in visible)
 
+# *Emphasis* used to reach the page as literal asterisks — `*did*`, `*people*` —
+# while the Markdown file beside it showed italics.
+check("*emphasis* becomes <em>", html_report._inline("evidence that *did* reach"),
+      "evidence that <em>did</em> reach")
+check("...hugging Chinese text, which puts no space around it",
+      html_report._inline("是因为*确实*触及"), "是因为<em>确实</em>触及")
+check("...after **bold**, which keeps its own markup",
+      html_report._inline("**Warning** and *this*"), "<strong>Warning</strong> and <em>this</em>")
+for literal in ('"Chen X*"[Author]', "p53* and BRCA1* status", "a * b * c"):
+    check(f"an asterisk that is not emphasis stays as it is: {literal}",
+          html_report._inline(literal), html_module.escape(literal, quote=False))
+check("two asterisks in neighbouring code spans never pair up",
+      html_report._inline("`*.csv` or `*.json`"), "<code>*.csv</code> or <code>*.json</code>")
+check("no *emphasis* is left as literal asterisks anywhere on the page",
+      re.findall(r"(?<![*\w])\*[^\s*<>][^*<>\n]*?[^\s*<>]?\*(?![*\w])", visible), [])
+
 
 # ============================================================
 # 5. Caveats travel with their numbers

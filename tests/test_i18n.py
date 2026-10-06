@@ -434,6 +434,15 @@ for label, built in reports.items():
     check(f"{label}: the Chinese report renders in strict mode", failure, "")
     check_true(f"{label}: ...and is in Chinese", HAN.search(chinese_md))
     check_true(f"{label}: ...as an HTML page that says so", '<html lang="zh-CN">' in chinese_html)
+    # Chinese puts no space around `*确实*`, which a rule written for English
+    # spacing would leave on the page as two asterisks.
+    page_text = re.sub(r"<(script|style)\b.*?</\1>|<code>.*?</code>", "", chinese_html, flags=re.S)
+    check(f"{label}: ...with no *emphasis* printed as literal asterisks",
+          re.findall(r"\*[^\s*<>]{1,40}\*", page_text), [])
+    # A separator the code writes between translated pieces — `", ".join`,
+    # `f"({notes})"` — is English punctuation unless it goes through the catalog.
+    check(f"{label}: ...with Chinese punctuation between translated pieces",
+          re.findall(r"[一-鿿][,;] |\((?=[一-鿿])", re.sub(r"`[^`]*`", "", chinese_md)), [])
     check(f"{label}: the English report is unchanged by having been translated",
           report.render_markdown(built), english_md)
     check(f"{label}: both carry one JSON record", report.json_record(view), report.json_record(built))
