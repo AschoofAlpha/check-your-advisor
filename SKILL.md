@@ -73,7 +73,7 @@ papers to 5 is not "+67%".
 is the star band relabelled on the same boundaries — the two are derived from one
 table so they cannot drift apart. A *fitted slope* in Section 9: the original
 objection stands, a handful of right-censored integer counts do not support one,
-so the slope is printed only above four points and only with its confidence
+so the slope is printed only from four points up and only with its confidence
 interval and point count in the same sentence. An *ordering of people* in
 Section 2, as a second table beside the roster rather than by sorting it, with
 the size of the roster printed beside the ranks. And a *percentile* against an
@@ -107,7 +107,7 @@ pretends otherwise.
 
 Every report carries the middle two lists in full. Section 14 registers what is
 not computed and says of each line whether it was refused, is waiting on a file,
-or cannot be obtained at all — including the two lines that record what was
+or cannot be obtained at all — including the lines that record what was
 un-refused and when, because a register that deletes the entry for something now
 being printed is a register nobody can audit. Section 16 prints two more under
 their own headings: what the scoring function itself refuses, which is still
@@ -304,13 +304,14 @@ every corpus at once and marks both citation components as having no data.
 Output is `advisor_compare_<timestamp>.md` plus a `.json` record; there is no
 HTML page for a comparison.
 
-The page carries a rank column, a star column and, for each adjacent pair in
-rank order, one sentence about which scored higher — N-1 sentences, not the
-N(N-1)/2 a full matrix would give. `--order-by` chooses the **column** order,
-`score` (highest first, the default) or `label` (lexicographic, which is what
-round one did). The ranks are computed and printed either way, because a rank is
-a property of the set and not of the column order; the page states which key
-ordered the columns, in words.
+The page carries a rank column, a star column, a letter column — the star band
+relabelled on the same edges, with the letter scale printed under the table —
+and, for each adjacent pair in rank order, one sentence about which scored
+higher: N-1 sentences, not the N(N-1)/2 a full matrix would give. `--order-by`
+chooses the **column** order, `score` (highest first, the default) or `label`
+(lexicographic, which is what round one did). The ranks are computed and printed
+either way, because a rank is a property of the set and not of the column order;
+the page states which key ordered the columns, in words.
 
 Read three things off the rank column before quoting it. It is standard
 competition ranking on the composite score — ties share a rank and skip the
@@ -763,13 +764,30 @@ options.
    be quoted with the score it coarsens. The directional sentence may be quoted
    as the page wrote it, and not upgraded: "A scored 4.2 points higher than B on
    the same five components" is the claim, "A is the better advisor" is not.
+   The same holds for Section 2's ranking of people: "second of the 14 people
+   this corpus names, by first-author slots" is the claim, "the group's
+   second-best student" is not.
 8. If the page refused a comparison — unlike component sets, unlike weight
    tables, a gate, a suppressed score — report the refusal and its reason. Do
    not substitute the subtraction yourself; it was withheld deliberately.
-9. If asked for a percentile, a letter grade or a trend, say the tool does not
-   produce it and why: a percentile needs a reference population that does not
-   exist here, letter grades are a deliberate omission next to the stars that do
-   exist, and five right-censored integer counts do not support a slope.
+9. If asked for a percentile, a letter grade or a trend, say which of them
+   exists, where, and what has to travel with it — each exists in one narrow
+   form only.
+   - **Percentile:** only for a citation count, and only after
+     `cite --percentile`. Quote the `basis` sentence each placed record carries in
+     `impact_reference_<timestamp>.json`; it names the OpenAlex topic-and-year
+     cell, the cell's size, the strictly-fewer rule and the tie block. A paper
+     that could not be placed has a named reason and is never a low position.
+     There is no percentile of the composite score and no position among the
+     corpora loaded: those need a reference population that does not exist
+     here.
+   - **Letter:** only on a `compare` page, where it is the star band relabelled
+     on the same edges. Quote it beside the score it coarsens, never as a grade
+     of the person.
+   - **Trend:** Section 9's slope, printed only from four yearly points up.
+     Quote it with its confidence interval and its point count, as the report
+     prints them; below four points there is none, and year-over-year
+     percentage change is never produced.
 10. If asked about impact factor, quartile or partition, say the tool joins them
     from a table the user fills in by hand and never fetches them, and point at
     `journal-worklist`. "The tool cannot show it" and "nobody has filled the

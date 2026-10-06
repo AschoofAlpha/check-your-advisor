@@ -2326,11 +2326,30 @@ check("no percentile value is printed",
       re.findall(r"\d+(?:\.\d+)?\s*(?:th|st|nd|rd)?\s*percentile", _ranked_page.lower()), [])
 check("no quantile position is printed",
       re.findall(r"\d+(?:\.\d+)?\s*(?:th|st|nd|rd)?\s*quantile", _ranked_page.lower()), [])
-check("no letter grade is printed in the rank table",
-      re.findall(r"\|\s*[A-DF][+-]?\s*\|", _ranked_page), [])
 check_true("...and the refusal of percentiles is still stated on the page",
-           "No percentile and no quantile position." in _ranked_page)
-check_true("...as is the refusal of letter tiers", "No letter tier." in _ranked_page)
+           "No percentile and no quantile position of any score on this page." in _ranked_page)
+
+# Round four's letter. Released as "letter bands beside the star bands" while the
+# page printed no letter and still said "No letter tier." under the table, so it
+# is pinned here by value: each ranked row prints the letter `rank_corpora`
+# derived from that row's own star band, and nothing else.
+_ranked = report.build_comparison([_cmp_entry("Higher", 16), _cmp_entry("Lower", 4)])
+_letter_rows = {row["label"]: row for row in _ranked["ranking"]["ranked"]}
+for _label in ("Higher", "Lower"):
+    _row = _letter_rows[_label]
+    check(f"the {_label} row's letter is its star band relabelled",
+          _row["letter"], _ranking.LETTER_SYMBOLS[_row["stars"] - 1])
+    check_true("...and the page prints it in that row's letter column",
+               re.search(rf"\| {_label} \|[^\n]*\| {_row['letter']} \|", _ranked_page) is not None)
+check_true("...with the letter scale printed beside the table",
+           _ranking.LETTER_BASIS in _ranked_page)
+check("the page no longer refuses the letter it prints",
+      "No letter tier." in _ranked_page, False)
+check("rows that took no position carry no letter, not the bottom band",
+      [item["letter"] for item in report.build_comparison(
+          [_cmp_entry("Scored", 12),
+           _cmp_entry("Refused", None, {"id": "G3", "name": "weak identity config"})]
+      )["corpora"]], [None, None])
 
 
 # ============================================================

@@ -31,10 +31,11 @@ And the line that did not move, asserted rather than assumed:
 
   - no percentile and no quantile, because there is no reference population;
   - no trend and no fitted slope, unchanged from round one;
-  - no ordering of people anywhere. A rank is a position among the corpora on one
-    page and says so; a letter is a position on a fixed scale and is not a
+  - no ordering of people in this module. A rank is a position among the corpora
+    on one page and says so; a letter is a position on a fixed scale and is not a
     position among anybody at all. Both are checked here by walking the whole
-    returned structure, not by grepping prose.
+    returned structure, not by grepping prose. The one ordering of people in the
+    package is `roles.rank_people`, and test_rank_people.py holds it.
 
 Pure computation: no file access, no network, standard library only.
 

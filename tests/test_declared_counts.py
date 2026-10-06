@@ -415,23 +415,29 @@ from check_your_advisor.profile.roles import RANKABLE  # noqa: E402
 from check_your_advisor.profile.trends import MIN_TREND_POINTS  # noqa: E402
 
 #: (capability, the constant proving it exists, phrases no doc may still carry).
-#: The phrases are the exact wordings that were in these files before round four.
+#: The phrases are the exact wordings that were in these files before round four,
+#: plus the ones round four missed: SKILL.md's instruction to a model to say the
+#: tool does not produce any of them, and plugin.json's description, which was
+#: not on the list below at all and went on refusing every one of them.
 NO_LONGER_REFUSED = (
     ("letter bands", LETTER_BANDS,
      ("no letter grade", "letter grade: stars are produced and letters are not",
-      "字母等级拒绝")),
+      "字母等级拒绝", "letter grades are a deliberate omission")),
     ("fitted slopes", MIN_TREND_POINTS,
-     ("and no fitted trend", "趋势拟合、任何对")),
+     ("no fitted trend", "趋势拟合、任何对", "do not support a slope")),
     ("ordering people", RANKABLE,
-     ("it never orders people", "no ordering of **people**, anywhere")),
+     ("it never orders people", "no ordering of **people**, anywhere",
+      "no ordering of people")),
     ("citation percentiles", MIN_REFERENCE_POPULATION,
      ("It still produces no percentile or quantile position,",
-      "百分位不是\"不给\"，是**算不出来**")),
+      "百分位不是\"不给\"，是**算不出来**",
+      "produce it and why: a percentile needs a reference population",
+      "No percentile, no letter grade")),
 )
 
 for _capability, _constant, _phrases in NO_LONGER_REFUSED:
     check_true(f"{_capability} is live (constant present)", bool(_constant))
-    for _doc in ("README.md", "README.zh-CN.md", "SKILL.md"):
+    for _doc in ("README.md", "README.zh-CN.md", "SKILL.md", ".claude-plugin/plugin.json"):
         _body = text(_doc)
         _stale = [phrase for phrase in _phrases if phrase in _body]
         check(f"{_doc} no longer refuses {_capability}"
@@ -449,6 +455,79 @@ check_true("...and README.md still says so in prose",
            "position among the corpora" in text("README.md"))
 check_true("...and README.zh-CN.md too",
            "在你加载的那几份语料里的位置" in text("README.zh-CN.md"))
+
+
+# ----------------------------------------------------------------------
+# The same rule one level down: what the package itself prints.
+#
+# The list above reads documents, and the package's own printed text went on
+# refusing all four capabilities after round four turned them on: the HTML
+# header said "It contains no ranking of people" above a Section 2 that ranks
+# people, `profile --help` and the log line after every run said there was no
+# percentile, no trend and no ranking of anyone, and the compare page said "No
+# letter tier." under a ranking that computes one per row. Each phrase below is
+# the exact wording removed when that was fixed. Read through `ast`, so a phrase
+# split across implicitly concatenated literals is still one string here.
+# ----------------------------------------------------------------------
+print("\n[round four] nothing the package prints still refuses them either")
+
+
+def printed_strings(rel: str) -> list[str]:
+    """Every string constant in one package file, adjacent literals joined."""
+    tree = ast.parse((PKG / rel).read_text(encoding="utf-8"))
+    return [node.value for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+
+
+STALE_PRINTED = (
+    ("profile/html_report.py", "It contains no ranking of people"),
+    ("profile/html_report.py", "nobody here is placed above anybody"),
+    ("profile/report.py", "No letter tier."),
+    ("profile/report.py", "Stars are produced and letter tiers are not"),
+    ("profile/report.py", "No ordering is produced from them: no rank, no percentile"),
+    ("profile/report.py", "No roster on any corpus's own report is ever sorted by a count."),
+    ("profile/caveats.py", "it is refused by decision: stars are produced and letters are not"),
+    ("cli.py", "不给 A/B/C 字母等级，不做趋势拟合"),
+    ("cli.py", "也没有把任何一个人排在另一个人前面"),
+    ("cli.py", "报告里没有百分位，没有 A/B/C 等级；排的是语料"),
+)
+for _rel, _phrase in STALE_PRINTED:
+    check(f"{_rel} no longer prints {_phrase!r}"
+          f"  [rewrite the string; the capability it refuses is live]",
+          any(_phrase in _s for _s in printed_strings(_rel)), False)
+
+
+# ----------------------------------------------------------------------
+# The percentile example both READMEs work through, against the method string
+# `cite --percentile` prints. The READMEs said a zero-cited paper would come back
+# as the 65th percentile under at-or-below; the method string, quoting the same
+# measured cell, said 36.7, and 1399 of 3808 is 36.7.
+# ----------------------------------------------------------------------
+print("\n[percentile] the worked example against PERCENTILE_METHOD")
+
+from check_your_advisor.impact_reference import PERCENTILE_METHOD  # noqa: E402
+
+_cell = re.search(r"(\d+) of the (\d+) papers in the measured \S+ cell have zero citations",
+                  PERCENTILE_METHOD)
+_figure = re.search(r"the ([\d.]+)th percentile", PERCENTILE_METHOD)
+check_true("PERCENTILE_METHOD still works its example through", _cell and _figure)
+if _cell and _figure:
+    _zero, _size = int(_cell.group(1)), int(_cell.group(2))
+    check("...and its at-or-below figure is its own arithmetic",
+          float(_figure.group(1)), round(100 * _zero / _size, 1))
+    for _doc, _rx, _order in (
+            ("README.md",
+             r"(\d+) of (\d+)\s+papers had never been cited.*?as the ([\d.]+)th percentile",
+             (1, 2)),
+            ("README.zh-CN.md",
+             r"(\d+) 篇里有 (\d+) 篇零引用.*?拿到 \*\*([\d.]+) 百分位", (2, 1))):
+        _m = re.search(_rx, text(_doc), re.S)
+        check_true(f"{_doc} still works the example through", _m)
+        if _m:
+            check(f"{_doc}'s example matches the method string"
+                  f"  [edit {where(_doc, _m.group(_order[0]))}]",
+                  (int(_m.group(_order[0])), int(_m.group(_order[1])), float(_m.group(3))),
+                  (_zero, _size, float(_figure.group(1))))
 
 
 print("\n" + "=" * 70)

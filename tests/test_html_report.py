@@ -496,13 +496,23 @@ check_true("...and says plainly that an absent one is not a low count",
            "is not a low count" in computed.lower())
 check("no per-person row carries a percentage",
       any("%" in line for line in computed.splitlines() if line.startswith("| ")), False)
-check_true("the header states there is no ranking of people",
-           "no ranking of people" in PAGE)
-check_true("...and enumerates what that rules out",
-           "no percentile, no quantile position and no letter grade" in PAGE)
+# The header used to say "It contains no ranking of people: nobody here is placed
+# above anybody" on a page whose Section 2 printed a table ranking people by
+# first-author slots. A header has to describe the page under it, so it now names
+# the one place people are ranked, and that place is checked to exist.
+check_true("the header names the one place people are ranked",
+           "People are ranked in one place only" in PAGE)
+check_true("...and that place is on the page",
+           "By first-author slots." in PAGE)
+check("...and it is the only ranking of people the page carries",
+      PAGE.count("By first-author slots."), 1)
+check_true("...and the header still rules out a letter grade and a percentile of the score",
+           "no percentile of the composite score and no letter grade anywhere on the page" in PAGE)
+check("the header no longer claims nobody is placed above anybody",
+      "nobody here is placed above anybody" in PAGE, False)
 # The other half of the same claim: the header has to be describing a page that
-# does print a score and a star band, or "no ranking of people" is just the old
-# prohibition reworded.
+# does print a score and a star band, or the header is just the old prohibition
+# reworded.
 check_true("...on a page that does print a composite score",
            "composite score" in PAGE.lower() and 'id="s16"' in PAGE)
 check_true("...and a star band derived from it",

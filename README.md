@@ -64,9 +64,10 @@ run loaded one corpus or nine, and the same for anyone else running the query.
 The definition matters more than it looks. The percentile is the share of works
 in the cell cited **strictly fewer** times. In one measured cell, 1399 of 3808
 papers had never been cited; under "at or below", every one of those would come
-back as the 65th percentile, printing "nobody cited this" as "above average".
-Strictly-fewer puts them at 0.0, which is true. The other reading is printed
-alongside, with the size of the tie, rather than chosen for you.
+back as the 36.7th percentile, printing "nobody cited this" as "ahead of more
+than a third of the field". Strictly-fewer puts them at 0.0, which is true. The
+other reading is printed alongside, with the size of the tie, rather than chosen
+for you.
 
 Papers that could not be placed never come back as low ones. Seven named statuses
 say which thing did not happen — no citation count, no identifier, topic lookup
@@ -334,7 +335,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-4905 assertions across 35 files, measured 2026-09-17 by the first command
+4933 assertions across 35 files, measured 2026-10-06 by the first command
 above — and that command re-measures it every run and fails if this sentence
 has drifted, which is why it is a number rather than a promise. The second run
 installs an import hook that

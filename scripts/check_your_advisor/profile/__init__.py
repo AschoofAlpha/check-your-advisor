@@ -14,28 +14,33 @@ tomorrow:
 fetched by `check_your_advisor.citations` into its own
 `citations_<timestamp>.json`), one composite score out of 100 under a weight
 table the user sets (`scoring`), the star band that score falls in, and several
-corpora laid side by side, ranked, with a sentence saying which of two scored
-higher (`ranking`, `report.build_comparison`). Each of these prints beside the
-denominator it was computed over and the inputs it consumed. This reverses the
-original blanket prohibition, in two deliberate steps and after review each
-time: first the values, then the ordering.
+corpora laid side by side, ranked, each with its star band and the letter that
+relabels it, and with a sentence saying which of two scored higher (`ranking`,
+`report.build_comparison`). Each of these prints beside the denominator it was
+computed over and the inputs it consumed. This reverses the original blanket
+prohibition, in deliberate steps and after review each time: first the values,
+then the ordering. Round four went further, on the user's instruction: a slope
+over Section 9's yearly counts with its interval beside it (`trends`), citation
+counts placed inside an external cell of OpenAlex works sharing their topic and
+year (`check_your_advisor.impact_reference`), and the ranking of people below.
 
-**Refused by design.** Percentile and quantile position — not merely withheld
-but uncomputable here, because nothing in this package holds a reference
-population and the corpora on a page are the few a user chose to load. Letter
-tiers A/B/C: stars are produced and letters are not, and that split is a
-decision, recorded so that a later reader does not unify them and reverse a call
-they were not party to. Fitted trends, slopes and year-over-year percentage
-change, unchanged from the original register — a handful of right-censored
-integer points do not support a slope. The current machine-readable register is
-`ranking.RANKING_EXCLUSIONS`; `scoring.SCORING_EXCLUSIONS` remains true of
-`composite_score` itself, which sees one corpus and can order nothing, and
-report Section 16 prints both with the sentence that says how they fit together.
+**Refused by design.** Percentile and quantile position of the composite score,
+or of a corpus among the corpora loaded — not merely withheld but uncomputable
+here, because nothing in this package holds a reference population of
+researchers and the corpora on a page are the few a user chose to load.
+Year-over-year percentage change, unchanged from the original register. The
+current machine-readable register is `ranking.RANKING_EXCLUSIONS`;
+`scoring.SCORING_EXCLUSIONS` remains true of `composite_score` itself, which
+sees one corpus and can order nothing, and report Section 16 prints both with
+the sentence that says how they fit together.
 
-**Ordering of people, still refused entirely.** No roster is ever sorted by a
-count, in the Markdown, in the HTML or in the interactive control, and no person
-is ever placed above another. The ranks that now exist are among *corpora*, on
-the side-by-side page, and every one of them prints the count it was taken over.
+**Ordering of people, in one table only.** No roster is ever sorted by a count,
+in the Markdown, in the HTML or in the interactive control. Round four added
+exactly one place where a person is placed above another: Section 2 prints a
+second table ranking the people it names by first-author slots
+(`roles.rank_people`), ties shared and the roster's size beside the ranks. Every
+other rank is among *corpora*, on the side-by-side page, and every one of them
+prints the count it was taken over.
 
 **Supplied by hand, or absent and said to be.** Journal Impact Factor, JCR
 quartile and CAS partition (`check_your_advisor.journals`), the degree-thesis
