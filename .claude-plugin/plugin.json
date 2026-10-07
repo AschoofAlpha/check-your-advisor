@@ -1,7 +1,7 @@
 {
   "name": "check-your-advisor",
   "description": "选导师前查课题组用的。输入导师名字，从 PubMed 和 OpenAlex 找出导师的论文，算出学生多久能发第一篇一作、一作主要给了谁、一般待几年，生成中英文报告。什么学科都能查。Looks up a PhD advisor's papers in PubMed and OpenAlex and works out how long students wait for a first-author paper, who gets them, and how long people stay.",
-  "version": "0.3.1",
+  "version": "0.4.0",
   "license": "MIT",
   "keywords": [
     "pubmed",

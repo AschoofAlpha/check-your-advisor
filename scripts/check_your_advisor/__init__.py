@@ -15,6 +15,6 @@ to decide whether there is an update — and tests/test_declared_counts.py fails
 when the three disagree.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 __all__ = ["__version__"]

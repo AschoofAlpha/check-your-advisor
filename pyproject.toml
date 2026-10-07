@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "check-your-advisor"
-version = "0.3.1"
+version = "0.4.0"
 description = "Looks up a PhD advisor's papers in PubMed and OpenAlex and works out how long students wait for a first-author paper, who gets them, and how long people stay. 选导师前查课题组用的。"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
