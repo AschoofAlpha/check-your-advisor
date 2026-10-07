@@ -30,6 +30,12 @@ The report opens with a one-page summary: a dozen lines, each a count with its
 denominator and the section it came from, warnings first. The twenty sections
 below it define every number and say what it cannot mean.
 
+![The one-page summary at the top of a report](https://raw.githubusercontent.com/AschoofAlpha/check-your-advisor/main/docs/images/report-summary-en.png)
+
+![Person activity timeline: one row per person, a filled square for each year with a first-author paper](https://raw.githubusercontent.com/AschoofAlpha/check-your-advisor/main/docs/images/report-timeline-en.png)
+
+*Both images come from a made-up lab. The names, journals and university are placeholders.*
+
 ## What it answers
 
 - who has appeared in this group over the window
@@ -400,7 +406,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-5246 assertions across 38 files with PyMuPDF installed, 5243 without it,
+5248 assertions across 38 files with PyMuPDF installed, 5245 without it,
 measured 2026-10-07 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The

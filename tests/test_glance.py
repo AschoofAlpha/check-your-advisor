@@ -144,7 +144,8 @@ check_true("the corpus size is Section 1's",
 wait = metrics["s4"]
 check_true("time to a first slot carries the people still without one, as Section 4 insists",
            any(f"median {report._fmt_number(wait['median'])} years over the {wait['denominator']} people"
-               in line and f"{len(wait['still_without_lead'])} people have none yet" in line for line in lines))
+               in line and f"leaves out {len(wait['still_without_lead'])} more with none so far" in line
+           for line in lines))
 check("no line passes judgement",
       [line for line in lines if re.search(r"\b(good|bad|recommend|avoid|safe|risky)\b", line, re.I)], [])
 

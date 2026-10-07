@@ -404,6 +404,13 @@ check_false("no single-appearance person is given a timeline row",
             any("Once" in row["name"] for row in gantt["rows"]))
 check_false("no senior collaborator is given a timeline row",
             any("Senior" in row["name"] for row in gantt["rows"]))
+# Stratum A is "holds a first-author slot", whatever the record count, so a person
+# whose one record is a first-author paper is plotted. The subtitle used to give
+# the rule as "everyone with two or more records", which that row contradicts.
+check_true("the subtitle states the row rule the cohort is built by",
+           "either holds a first-author slot or has two or more records" in gantt_svg)
+check_false("...and not the narrower one it used to state",
+            "everyone with two or more records" in gantt_svg)
 
 height = float(re.search(r'<svg[^>]* height="([\d.]+)"', gantt_svg).group(1))
 chrome = height - charts.ROW_PITCH * n_rows

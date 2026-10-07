@@ -4368,8 +4368,8 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
     if lead and not lead.get("suppressed"):
         counts = lead.get("counts") or {}
         lines.append(en(
-            "Of {denominator} people, {held} held a first-author slot, {without} were observed for "
-            "{lag} or more years without one, and {recent} appeared too recently to tell (Section 3).",
+            "Of {denominator} people, {held} held a first-author slot, {without} went {lag} or more "
+            "observed years without one, and {recent} appeared too recently to tell (Section 3).",
             denominator=lead.get("denominator", "?"), held=counts.get("holds_lead", 0),
             without=counts.get("observed_without_lead", 0), lag=lead.get("lag_years", "?"),
             recent=counts.get("too_recent", 0)))
@@ -4382,8 +4382,8 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
     elif wait and wait.get("median") is not None:
         lines.append(en(
             "Time to a first first-author slot: median {median} years over the {denominator} people "
-            "who reached one, {at_zero} of them already in it on their first record; {without} people "
-            "have none yet, and the median leaves them out (Section 4).",
+            "who reached one, {at_zero} of them already in it on their first record; the median leaves "
+            "out {without} more with none so far (Section 4).",
             median=_fmt_number(wait["median"]), denominator=wait.get("denominator", "?"),
             at_zero=wait.get("count_at_zero", "?"), without=len(wait.get("still_without_lead") or [])))
 
@@ -4395,8 +4395,8 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
         buckets = span.get("buckets") or {}
         lines.append(en(
             "Observed span from a person's first record to their last: median {median} years "
-            "(IQR {low}–{high}) over {complete} people seen start and finish; {right} were still "
-            "appearing when the window closed (Section 5).",
+            "(IQR {low}–{high}) over {complete} people seen start and finish; {right} still appeared "
+            "when the window closed (Section 5).",
             median=_fmt_number(span["median"]), low=_fmt_number(low), high=_fmt_number(high),
             complete=buckets.get("complete", "?"),
             right=int(buckets.get("right_censored", 0) or 0) + int(buckets.get("both_censored", 0) or 0)))

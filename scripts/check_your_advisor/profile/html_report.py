@@ -789,6 +789,10 @@ blockquote.caveat p{margin:0}
 .warnbox p{margin:0;font-size:.95rem}
 figure{margin:1rem 0;max-width:1100px}
 .figscroll{overflow-x:auto;border:1px solid var(--rule);padding:.3rem;background:var(--bg)}
+/* Every figure is drawn 1100 wide and the box around it holds 1088, so each one
+   scrolled sideways by 12px on any screen. From 900px up it is scaled to the box
+   (by 1% on a wide screen); below that the scrollbar is the better choice. */
+@media (min-width:900px){.figscroll svg{display:block;max-width:100%;height:auto}}
 .figure-note{border:1px solid var(--rule);padding:.6rem;background:var(--soft);max-width:78ch}
 figcaption{margin:.45rem 0 0;font-size:.88rem;color:var(--ink);max-width:78ch}
 .tablescroll{overflow-x:auto}

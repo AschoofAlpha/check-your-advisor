@@ -169,9 +169,10 @@ def person_timeline_chart(
             + [int(item["year"]) for item in (s9.get("years") or [])]
             + [int(prov[key]) for key in ("window_start_year", "window_end_year") if prov.get(key)])
     sub_lines = wrap(
-        en("{head}: everyone with two or more records who never holds the senior "
-           "slot. {single_count} people appear once ({c}), named beside this figure "
-           "and counted in the strip below the axis, never plotted. {senior_count} "
+        en("{head}: everyone who never holds the senior slot and either holds a "
+           "first-author slot or has two or more records. {single_count} people appear "
+           "once, not as first author ({c}), named beside this figure and counted in "
+           "the strip below the axis, never plotted. {senior_count} "
            "hold a senior slot ({d}) and sit in a separate panel. Strict keying finds "
            "{n_strict} people, loose keying finds {n_loose}: that gap is the error "
            "bar on every count here. {n_hyper} records with "

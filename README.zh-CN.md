@@ -26,6 +26,12 @@ python3 scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
 报告开头是一页速览：十来行，每行一个带分母的数，并注明出自哪一节，有提示的话提示排最前。
 下面二十节给出每个数的定义，以及它不能说明什么。
 
+![报告开头的一页速览](https://raw.githubusercontent.com/AschoofAlpha/check-your-advisor/main/docs/images/report-summary-zh.png)
+
+![人员活动时间线：每行一个人，实心方块表示那一年有一作论文](https://raw.githubusercontent.com/AschoofAlpha/check-your-advisor/main/docs/images/report-timeline-zh.png)
+
+*两张图用的是编出来的课题组，人名、期刊和学校都是占位用的。*
+
 ## 它回答什么
 
 - 这个组这些年出现过谁
@@ -338,7 +344,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-38 个文件 5246 条断言（装了 PyMuPDF 时；没装时 5243 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-07 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
+38 个文件 5248 条断言（装了 PyMuPDF 时；没装时 5245 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-07 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
 import hook，在每个测试进程里屏蔽
 `requests`、`urllib3`、`pandas`、`numpy`、`matplotlib`、`fitz`、`openpyxl`。
 这是"不需要装东西"这句话唯一的保证，而不是只是嘴上说说：
