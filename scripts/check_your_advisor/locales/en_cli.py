@@ -162,7 +162,7 @@ MESSAGES = {
     'OpenAlex 作品转换: %d 条可用，%d 条因本人不在第一/末位/通讯位被跳过': 'OpenAlex works converted: %d usable, %d skipped because this person holds no first/last/corresponding position',
     '导出': 'Export',
     'HTML 报告始终生成，这一组只加副本。PDF 走本机已装的转换器（wkhtmltopdf / Chrome 无头 / weasyprint / soffice），本包不带 PDF 引擎、也不为此新增任何依赖；一个都没装就打印怎么装，HTML 输出一个字节都不变。': 'The HTML report is always generated; this group only adds copies. PDF goes through a converter already installed on this machine (wkhtmltopdf / headless Chrome / weasyprint / soffice); this package ships no PDF engine and adds no dependency for it; with none installed it prints how to install one, and the HTML output does not change by a single byte.',
-    'PubMed 论文检索与下载工具 (v2.1)': 'PubMed paper search and download tool (v2.1)',
+    'check-your-advisor %s · 论文检索与下载 · 来源: %s': 'check-your-advisor %s · paper search and download · source: %s',
     '作者: %s | 机构: %s | 近 %d 年': 'Author: %s | affiliation: %s | last %d years',
     'PDF下载: %s': 'PDF download: %s',
     '关闭': 'off',

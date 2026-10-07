@@ -620,13 +620,34 @@ SUBCOMMANDS = {"harvest", "fetch", "profile", "cite", "compare", "diff", "journa
                "journal-risk", "download", "clean-cache"}
 
 
+def _leading_globals(argv: list[str]) -> tuple[list[str], list[str]]:
+    """Split off `--lang X` / `--lang=X` written before the subcommand.
+
+    `--lang` is defined on every subcommand's parser, so `run.py harvest --lang zh`
+    always worked, while `run.py --lang zh harvest` sent everything to the default
+    `fetch` parser and was answered with "unrecognized arguments: harvest".
+    """
+    lead: list[str] = []
+    rest = list(argv)
+    while rest and (rest[0] == "--lang" or rest[0].startswith("--lang=")):
+        take = 1 if "=" in rest[0] else 2
+        lead += rest[:take]
+        rest = rest[take:]
+    return lead, rest
+
+
 def _split_subcommand(argv: list[str] | None) -> tuple[str, list[str]]:
-    """Pop a leading subcommand if present; default to 'fetch' for backward compat."""
+    """Pop a leading subcommand if present; default to 'fetch' for backward compat.
+
+    A `--lang` written ahead of the subcommand is moved behind it, where its
+    parser looks for it.
+    """
     if argv is None:
         argv = sys.argv[1:]
-    if argv and argv[0] in SUBCOMMANDS:
-        return argv[0], argv[1:]
-    return "fetch", list(argv)
+    lead, rest = _leading_globals(argv)
+    if rest and rest[0] in SUBCOMMANDS:
+        return rest[0], rest[1:] + lead
+    return "fetch", lead + rest
 
 
 def _force_utf8_stdio() -> None:
@@ -724,7 +745,7 @@ def main(argv: list[str] | None = None):
     # Ahead of the subcommand split, because with no subcommand every argument
     # goes to the `fetch` parser, which answered `--version` with a usage error
     # and exit 2 — so nothing installed could say which release it was.
-    if args[:1] in (["--version"], ["-V"]):
+    if _leading_globals(args)[1][:1] in (["--version"], ["-V"]):
         print(f"check-your-advisor {__version__}")
         return 0
     cmd, rest = _split_subcommand(args)
@@ -2429,6 +2450,7 @@ def _resolve_openalex_identity(
         cfg.get("author_name", ""),
         affiliation=cfg.get("affiliation", ""),
         mailto=cfg.get("email", ""),
+        pubmed_follows=(cfg.get("source") or "pubmed") != "openalex",
     )
     if record["openalex_author_id"]:
         # Written back so the PubMed filter, the provenance block and
@@ -2528,13 +2550,21 @@ def cmd_fetch(argv: list[str]):
     log_file = setup_logging(cfg["output_dir"], cfg["log_level"])
     logger = logging.getLogger("check_your_advisor.main")
 
+    # Decided before the banner so the banner, and the PubMed-only lines further
+    # down, say what this run will actually ask: `--source openalex` never talks
+    # to NCBI, and a run that printed "PubMed" over it read as the wrong tool.
+    source = cfg.get("source") or "pubmed"
+    merge_requested = bool((cfg.get("openalex") or {}).get("merge_works"))
+    sources_label = ("OpenAlex" if source == "openalex"
+                     else "PubMed + OpenAlex" if merge_requested else "PubMed")
+
     logger.info("=" * 60)
-    logger.info("PubMed 论文检索与下载工具 (v2.1)")
+    logger.info("check-your-advisor %s · 论文检索与下载 · 来源: %s", __version__, sources_label)
     logger.info("作者: %s | 机构: %s | 近 %d 年", cfg["author_name"], cfg["affiliation"], cfg["years_back"])
     logger.info("并发: %d 线程 | 日志: %s", cfg["max_workers"], log_file)
     logger.info("PDF下载: %s", "启用" if cfg.get("download_pdfs") else "关闭")
     logger.info("=" * 60)
-    if not cfg.get("api_key"):
+    if not cfg.get("api_key") and source != "openalex":
         logger.warning("未配置 PubMed API key，将按 NCBI 匿名限速请求。")
     if cfg.get("download_pdfs") and not cfg.get("email"):
         logger.warning("未配置 Unpaywall 邮箱，Unpaywall 源会自动跳过。")
@@ -2602,9 +2632,7 @@ def cmd_fetch(argv: list[str]):
     # print how much of the matched set was actually retrieved, rather than
     # rebuilding a guess from the config it happens to be run with later.
     search_provenance: dict = {}
-    source = cfg.get("source") or "pubmed"
     resolved_id = _openalex_id(identity_cfg.get("openalex_author_id"))
-    merge_requested = bool((cfg.get("openalex") or {}).get("merge_works"))
     if source == "openalex":
         # Nothing is asked of PubMed at all: for an advisor outside biomedicine a
         # PubMed search by a common name returns only namesakes, and the identity
@@ -2654,7 +2682,11 @@ def cmd_fetch(argv: list[str]):
             _log_identity_hints(hints, logger)
 
     # Step 3: 过滤（带机构深度验证 + [Keep]/[Skip] 日志）
-    logger.info("筛选第一/通讯作者 + 机构身份验证...")
+    # Logged only over records PubMed returned: with none — `--source openalex`,
+    # or a name PubMed does not know — "0 passed / 0 rejected" reported on a
+    # filter that had nothing to read.
+    if all_papers:
+        logger.info("筛选第一/通讯作者 + 机构身份验证...")
     matched_papers = []
     skipped_papers = []
     for p in all_papers:
@@ -2667,8 +2699,9 @@ def cmd_fetch(argv: list[str]):
         else:
             skipped_papers.append(p)
 
-    logger.info("身份验证结果: %d 篇通过 / %d 篇拒绝 / %d 篇总计",
-                len(matched_papers), len(skipped_papers), len(all_papers))
+    if all_papers:
+        logger.info("身份验证结果: %d 篇通过 / %d 篇拒绝 / %d 篇总计",
+                    len(matched_papers), len(skipped_papers), len(all_papers))
 
     # Written here, on the line above the fallback, and read nowhere else. These
     # are the two numbers the log line just printed, and `verified` means what

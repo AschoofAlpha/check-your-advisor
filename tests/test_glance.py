@@ -191,6 +191,10 @@ page = html_report.render_html(clean, {})
 check_true("the HTML page carries the summary card", 'id="glance"' in page)
 check_true("...between the page header and the section list",
            page.index("</header>") < page.index('id="glance"') < page.index('<nav class="toc"'))
+check_true("...and above the paragraph saying what the page is, which used to sit in the header over it",
+           page.index('id="glance"') < page.index("This report describes publication metadata"))
+header = page[page.index('<header class="page">'):page.index("</header>")]
+check("...leaving the header a title and a date", re.sub(r"<[^>]+>", "", header).count("."), 1)
 card = page[page.index('id="glance"'):page.index("</section>", page.index('id="glance"'))]
 check("...one list item per summary line", card.count("<li>"), len(lines))
 zh_page = html_report.render_html(report.localize(clean, "zh"), {})

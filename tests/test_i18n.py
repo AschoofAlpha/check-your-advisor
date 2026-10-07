@@ -538,6 +538,15 @@ check_true("...and says why in Chinese", "错误：无法识别的参数：--bog
 code, out = run(["profile", "--bogus"])
 check_true("...and in English on an English system", "error: unrecognized arguments: --bogus" in out)
 
+# `--lang` is defined on every subcommand's parser, so it used to work only after
+# the verb: `run.py --lang zh harvest` went to the default parser whole and was
+# told "unrecognized arguments: harvest".
+code, help_front = run(["--lang", "zh", "profile", "--help"])
+check("--lang ahead of the subcommand is accepted", code, 0)
+check_true("...and obeyed", "综合分" in help_front)
+code, out = run(["--lang=en", "--version"], locale="zh_CN.UTF-8")
+check_true("...ahead of --version too", code == 0 and out.startswith("check-your-advisor "))
+
 import argparse  # noqa: E402
 
 from check_your_advisor import cli  # noqa: E402
@@ -546,6 +555,11 @@ from check_your_advisor.locales.argparse_zh import ARGPARSE_ZH  # noqa: E402
 import gettext  # noqa: E402
 
 check_true("importing the CLI leaves argparse's gettext alone", argparse._ is gettext.gettext)
+check("a leading --lang moves behind the subcommand, where its parser reads it",
+      cli._split_subcommand(["--lang", "zh", "harvest", "--author", "X"]),
+      ("harvest", ["--author", "X", "--lang", "zh"]))
+check("...and with no subcommand it stays with the default parser's arguments",
+      cli._split_subcommand(["--lang=en", "--author", "X"]), ("fetch", ["--lang=en", "--author", "X"]))
 cli._translate_argparse()
 for lang, prefix in (("zh", "用法："), ("en", "usage: "), (None, "usage: "), ("zh", "用法：")):
     i18n.set_language(lang)

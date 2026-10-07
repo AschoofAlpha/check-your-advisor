@@ -640,6 +640,33 @@ def _render_glance(report: Mapping[str, Any]) -> str:
     ])
 
 
+def _render_about() -> str:
+    """What the page is and is not, in one paragraph under the summary."""
+    return '<div class="about"><p class="stamp">' + en(
+        "This report describes publication metadata. Section 16 states one composite score out "
+        "of 100 beside every input and the full weight table that produced it, and the star band "
+        "that score falls in beside the band edges that decided it — a star count is that same "
+        "score coarsened and nothing else. People are ranked in one place only: a second table "
+        "in Section 2 orders the people it names by first-author slots, with the size of the "
+        "roster beside the ranks, and the roster itself is never re-sorted by a count. Section 9 "
+        "fits a slope over the yearly counts only when there are enough of them, with its "
+        "interval in the same sentence. Section 15 places citation counts among every OpenAlex "
+        "work sharing a paper's topic and publication year when <code>cite --percentile</code> "
+        "fetched those cells — a position among those works, never among researchers. There is "
+        "no percentile of the composite score and no letter grade anywhere on the page. Section "
+        "17 counts graduates who published nothing at all, which is the one population every "
+        "other section is blind to. Section 18 carries the impact factor and the partitions only "
+        "when you supplied the table yourself, with the edition and the retrieval date printed "
+        "beside every one. Beneath them sit OpenAlex's own journal-level numbers, which "
+        "<code>journal-risk</code> collects with no table and which are not the JCR's, and the "
+        "public risk signals three open APIs returned about those journals on a stated day — "
+        "statements with their source attached, never a rating: nothing on this page calls any "
+        "journal predatory and no count of those signals becomes a grade. Section 20 reproduces "
+        "student evaluations you collected by hand, each beside its source and the day it was "
+        "read; they are printed as given and nothing is computed over them — no sentiment "
+        "analysis, no average, no rating, and no contribution to any score on this page.") + "</p></div>"
+
+
 def _render_html(report: Mapping[str, Any], charts: Any) -> str:
     name = str(report.get("author_name") or "").strip() or en("(unnamed researcher)")
     title = en("Observed publication pattern — {name}", name=name)
@@ -660,38 +687,22 @@ def _render_html(report: Mapping[str, Any], charts: Any) -> str:
         f'<a class="skip" href="#main">{_esc(en("Skip to content"))}</a>',
         '<header class="page">',
         f"<h1>{_esc(title)}</h1>",
-        '<p class="stamp">' + en(
-        "Generated {generated}. "
-        "This report describes publication metadata. Section 16 states one composite score out "
-        "of 100 beside every input and the full weight table that produced it, and the star band "
-        "that score falls in beside the band edges that decided it — a star count is that same "
-        "score coarsened and nothing else. People are ranked in one place only: a second table "
-        "in Section 2 orders the people it names by first-author slots, with the size of the "
-        "roster beside the ranks, and the roster itself is never re-sorted by a count. Section 9 "
-        "fits a slope over the yearly counts only when there are enough of them, with its "
-        "interval in the same sentence. Section 15 places citation counts among every OpenAlex "
-        "work sharing a paper's topic and publication year when <code>cite --percentile</code> "
-        "fetched those cells — a position among those works, never among researchers. There is "
-        "no percentile of the composite score and no letter grade anywhere on the page. Section "
-        "17 counts graduates who published nothing at all, which is the one population every "
-        "other section is blind to. Section 18 carries journal-level numbers only when you supplied the table yourself, "
-        "with the edition and the retrieval date printed beside every one, and beneath them the "
-        "public risk signals three open APIs returned about those journals on a stated day — "
-        "statements with their source attached, never a rating: nothing on this page calls any "
-        "journal predatory and no count of those signals becomes a grade. Section 20 reproduces "
-        "student evaluations you collected by hand, each beside its source and the day it was "
-        "read; they are printed as given and nothing is computed over them — no sentiment "
-        "analysis, no average, no rating, and no contribution to any score on this page.",
-        generated=_esc(report.get("generated_at", ""))) + "</p>",
+        '<p class="stamp">' + en("Generated {generated}.",
+                                 generated=_esc(report.get("generated_at", ""))) + "</p>",
         "</header>",
     ]
 
+    # The summary first, then what the page is: the paragraph below used to sit in
+    # the header, above the summary, and at seventeen lines it pushed the one part
+    # meant to be read in a minute below the fold.
     if refused:
+        parts.append(_render_about())
         parts.append('<main id="main">')
         parts.append(_render_refusal(report))
     else:
         caveat_ids = _caveat_index(report)
         parts.append(_render_glance(report))
+        parts.append(_render_about())
         parts.append(_render_nav(sections))
         parts.append('<main id="main">')
         parts += [_render_section(section, report, bundle, caveat_ids) for section in sections]
@@ -752,6 +763,7 @@ section.glance{max-width:1140px;margin:0 auto;padding:1rem 1rem 1.1rem;border-bo
 section.glance ul{max-width:84ch;padding-left:1.2rem}
 section.glance li{margin:.25rem 0}
 section.glance .lede{color:var(--muted);font-size:.9rem;max-width:84ch}
+.about{max-width:1140px;margin:0 auto;padding:.8rem 1rem}
 nav.toc{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--rule);
  padding:.4rem 1rem}
 nav.toc ol{list-style:none;display:flex;flex-wrap:wrap;gap:.1rem .9rem;margin:0;padding:0;font-size:.8rem}

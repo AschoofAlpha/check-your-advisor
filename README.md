@@ -400,7 +400,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-5232 assertions across 38 files with PyMuPDF installed, 5229 without it,
+5246 assertions across 38 files with PyMuPDF installed, 5243 without it,
 measured 2026-10-07 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The

@@ -185,9 +185,12 @@ logging.getLogger("check_your_advisor").setLevel(logging.ERROR)
 print("\n--- --source openalex ---")
 
 client = Client([work(i) for i in range(3)])
-code, calls, corpus, _log = harvest(["--source", "openalex", "--openalex-author-id", OPENALEX_ID],
-                                    pmids=["1", "2"], records=[], client=client)
+code, calls, corpus, log = harvest(["--source", "openalex", "--openalex-author-id", OPENALEX_ID],
+                                   pmids=["1", "2"], records=[], client=client)
 check("PubMed is not searched", calls, [])
+check_true("the log's banner names the source it will use", "来源: OpenAlex" in log)
+check("...and says nothing about a PubMed key, a PubMed filter or a PubMed merge it never runs",
+      [phrase for phrase in ("PubMed API key", "身份验证结果", "语料合并：PubMed") if phrase in log], [])
 check_true("a corpus is written", corpus)
 check("...holding the three OpenAlex works", len((corpus or {}).get("papers", [])), 3)
 check("...and saying PubMed was not searched", (corpus or {}).get("search", {}).get("pubmed_searched"), False)
@@ -203,12 +206,28 @@ ambiguous = Client([], authors=[candidate("A1", "Peking University", "Computer V
 code, calls, corpus, log = harvest(["--source", "openalex", "--affiliation", "Peking University"],
                                    pmids=[], records=[], client=ambiguous)
 check("with two candidates and no id it stops with exit code 1", code, 1)
+check("...without promising a PubMed search that will not happen", "PubMed 单源" in log, False)
 check("...writes no corpus", corpus, None)
 check("...and never falls back to PubMed", calls, [])
 check_true("...after asking OpenAlex who publishes under the name",
            any("/authors" in url for url in ambiguous.calls))
 check_true("...and listing each candidate with what they work on",
            "Computer Vision (Computer Science)" in log and "Cardiology (Medicine)" in log)
+
+
+
+class DownClient(Client):
+    """OpenAlex unreachable: every request comes back as no response at all."""
+
+    def get(self, url: str, **kwargs):
+        self.calls.append(url)
+        return None
+
+
+code, calls, corpus, log = harvest(["--source", "openalex", "--affiliation", "Peking University"],
+                                   pmids=[], records=[], client=DownClient([]))
+check("an unreachable OpenAlex stops the run with exit code 1", (code, corpus, calls), (1, None, []))
+check("...and the log does not say a PubMed search goes ahead", "PubMed 检索照常进行" in log, False)
 
 overrides = cli.apply_cli_overrides({}, cli.parse_fetch_args(["--author", AUTHOR, "--source", "openalex"]))
 check("--source openalex switches on the author lookup and the works merge",
@@ -225,6 +244,8 @@ print("\n--- PubMed returns nothing ---")
 
 code, calls, corpus, log = harvest([], pmids=[], records=[], client=Client([]))
 check("the default source still stops when PubMed has nothing", corpus, None)
+check_true("...under a banner naming PubMed, with the anonymous-rate warning a PubMed run needs",
+           "来源: PubMed" in log and "PubMed API key" in log)
 check_true("...but now names the flag that covers every field",
            "--source openalex" in log)
 
@@ -232,6 +253,7 @@ code, calls, corpus, log = harvest(["--source", "both", "--openalex-author-id", 
                                    pmids=[], records=[], client=Client([work(i) for i in range(2)]))
 check("--source both survives an empty PubMed side", len((corpus or {}).get("papers", [])), 2)
 check("...searched PubMed first", calls, [AUTHOR])
+check_true("...under a banner naming both sources", "来源: PubMed + OpenAlex" in log)
 check("...and records both sources as searched, PubMed with no hits",
       ((corpus or {}).get("search", {}).get("sources"), (corpus or {}).get("search", {}).get("esearch_matched")),
       (["pubmed", "openalex"], 0))

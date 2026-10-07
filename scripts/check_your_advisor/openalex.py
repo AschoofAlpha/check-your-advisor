@@ -330,6 +330,7 @@ def resolve_author(
     mailto: str = "",
     limit: int = CANDIDATE_LIMIT,
     now: datetime | None = None,
+    pubmed_follows: bool = True,
 ) -> dict[str, Any]:
     """Ask OpenAlex who publishes under `name`, and never decide between them.
 
@@ -356,6 +357,10 @@ def resolve_author(
     rather than by post-filtering the results, so a name that returns forty
     people can be cut to the handful at one university without this code
     inventing a matching rule of its own.
+
+    `pubmed_follows` says whether a PubMed search comes after this lookup, which
+    is all the failure and ambiguity messages differ on: under `harvest --source
+    openalex` nothing does, and the run stops without an author.
     """
     name = " ".join(str(name or "").split())
     if not name:
@@ -376,10 +381,16 @@ def resolve_author(
         f"authors?{query}",
     )
     if data is None:
-        logger.warning(
-            "OpenAlex 作者查询失败，本次不做 OpenAlex 消歧；PubMed 检索照常进行。"
-            "这与「查到了但没有此人」不是一回事，语料里记为 resolution=error。"
-        )
+        if pubmed_follows:
+            logger.warning(
+                "OpenAlex 作者查询失败，本次不做 OpenAlex 消歧；PubMed 检索照常进行。"
+                "这与「查到了但没有此人」不是一回事，语料里记为 resolution=error。"
+            )
+        else:
+            logger.warning(
+                "OpenAlex 作者查询失败，本次没有可用的作者。"
+                "这与「查到了但没有此人」不是一回事。"
+            )
         return _resolution("error", query=query, candidates=[], now=now)
 
     results = data.get("results")
@@ -409,11 +420,18 @@ def resolve_author(
         return _resolution("unique", query=query, candidates=candidates,
                            author_id=chosen["openalex_author_id"], now=now)
 
-    logger.warning(
-        "OpenAlex 里「%s」对应 %d 位候选作者，**不替你选**。下面逐条列出，"
-        "认出是哪一位后加 --openalex-author-id <ID> 重跑即可；本次检索按 PubMed 单源进行。",
-        name, len(candidates),
-    )
+    if pubmed_follows:
+        logger.warning(
+            "OpenAlex 里「%s」对应 %d 位候选作者，**不替你选**。下面逐条列出，"
+            "认出是哪一位后加 --openalex-author-id <ID> 重跑即可；本次检索按 PubMed 单源进行。",
+            name, len(candidates),
+        )
+    else:
+        logger.warning(
+            "OpenAlex 里「%s」对应 %d 位候选作者，**不替你选**。下面逐条列出，"
+            "认出是哪一位后加 --openalex-author-id <ID> 重跑即可。",
+            name, len(candidates),
+        )
     for index, candidate in enumerate(candidates, 1):
         logger.warning(
             "  候选 %d/%d: %s | ID=%s | ORCID=%s | 作品数=%s | 被引=%s | 机构: %s | 方向: %s",
@@ -952,6 +970,16 @@ def merge_corpora(
         "openalex_only": added - len(folded),
         "both": both,
     }
+    if not pubmed_papers:
+        # Nothing to merge into — `--source openalex`, or a name PubMed does not
+        # know — so the cross-source half of the line below is zeros by
+        # construction and only the OpenAlex side is worth a sentence.
+        logger.info(
+            "语料：OpenAlex %d 篇，没有 PubMed 记录可合并；同一作品在 OpenAlex 里重复登记的 %d 条已去掉，剩 %d 篇。",
+            counts["openalex_total"], sum(internal_duplicates.values()), counts["merged_total"],
+        )
+        return {"papers": merged, "counts": counts, "matched_on": matched_on,
+                "openalex_internal_duplicates": internal_duplicates}
     logger.info(
         "语料合并：PubMed %d 篇 + OpenAlex %d 篇 → 合并后 %d 篇"
         "（两源共有 %d 篇，仅 PubMed %d 篇，仅 OpenAlex %d 篇；"
