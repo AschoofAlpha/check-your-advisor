@@ -100,7 +100,7 @@ strength:
 | `--orcid 0000-0002-...` | Strongest. One is worth all the rest |
 | `--author-email wangwei@pku.edu.cn` | The advisor's own address, from the lab page, matched whole. Short of an ORCID the strongest there is: a namesake at the same university does not share it. Repeatable |
 | `--email-domain your-university.edu.cn` | The corresponding author's domain, matched at a label boundary. Repeatable |
-| `--affiliation-keyword "..."` | Weakest — it fails on same-name colleagues inside one university system |
+| `--affiliation-keyword "..."` | Weakest. A university name lets every same-name colleague there through; a department narrows it to that department. Defaults to whatever `--affiliation` says |
 | `--resolve-openalex` / `--openalex-author-id A...` | OpenAlex's own author clustering. Recorded as OpenAlex's assertion, never as yours |
 
 `--resolve-openalex` prints every OpenAlex author publishing under this name,
@@ -115,10 +115,14 @@ you recognise the right one.
 **No ORCID and no address?** `harvest` then lists the email addresses and
 departments the bylines print beside the name — most frequent first, counted
 before the identity filter — and Section 1 repeats the list. Different people
-sharing the name separate there. Pick the advisor's and re-run with
-`--author-email` (or the department as `--affiliation-keyword`); add
-`--require-affiliation` to keep the namesakes' records out of the corpus rather
-than in it, marked as name matches.
+sharing the name separate there. Pick the advisor's, then re-run with their
+department as `--affiliation-keyword` and add `--require-affiliation`: records
+are checked against that department, and a namesake in another department stays
+out of the corpus rather than in it, marked as a name match. The search still
+covers `--affiliation`. The address alone is not enough, because the university
+named by `--affiliation` stays in the check and lets every namesake there
+through; give it with `--author-email` on top of the department, and a record
+printing it counts whatever its department.
 
 If the harvest recorded no evidence at all, the report still renders — with a
 warning box at the top of Sections 0, 1 and 19 naming the condition, the numbers
@@ -408,7 +412,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-5272 assertions across 38 files with PyMuPDF installed, 5269 without it,
+5335 assertions across 39 files with PyMuPDF installed, 5332 without it,
 measured 2026-10-07 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The

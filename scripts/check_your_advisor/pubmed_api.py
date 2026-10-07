@@ -10,6 +10,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import xml.etree.ElementTree as ET
 from collections import Counter
 from collections.abc import Mapping
@@ -268,6 +269,7 @@ def search_pubmed(
     identity: dict | None = None,
     provenance: dict | None = None,
     max_records: int = MAX_RECORDS,
+    affiliation: str = "",
 ) -> list[str]:
     """
     搜索 PubMed，用 retstart 翻页取完全部命中，返回 PMID 列表。
@@ -286,6 +288,12 @@ def search_pubmed(
     「整份报告作废」，而翻页之后 N < M 的常见成因已经是去重和 PubMed 自己的
     Count 漂移，用它拒绝一份取全了的语料是误伤。
 
+    第 3 步收窄用的是 `affiliation`（检索机构，即 --affiliation）加上全部机构
+    关键词，用 OR 连起来。关键词是逐条核对署名用的，常常是一个科室的全称；PubMed
+    对这么长的短语做 [Affiliation] 检索只找得回一小部分——实测一次：科室短语命中
+    2 条，而手里按学校检索到的记录里，这个科室排在第一/末位/通讯位的就有 9 条。
+    和学校名 OR 在一起，检索只会更宽，收窄交给核对去做。
+
     `provenance` 是可选的输出参数：传一个 dict 进来，检索的实际参数、命中数、
     翻了几页、丢弃了几个重复 PMID 都会写进去。这些量本来只存在于本函数内部，
     随日志一起消失，于是下游的画像报告无从知道语料覆盖到什么程度。用可选参数
@@ -299,6 +307,8 @@ def search_pubmed(
     identity = identity or {}
     orcid = (identity.get("orcid") or "").strip()
     affil_keywords = identity.get("affiliation_keywords") or []
+    narrow_terms = [term for term in dict.fromkeys(
+        [str(affiliation or "").strip(), *(str(k).strip() for k in affil_keywords)]) if term]
 
     def _request(term: str, want: int, start: int = 0) -> tuple[list[str], int]:
         params = {
@@ -336,8 +346,8 @@ def search_pubmed(
 
     # 收窄的触发点是总预算而不是页大小：翻页之后 retmax 只决定发几次请求，
     # 命中 900 条、retmax=500 已经能一条不少地取回，没有理由为此改检索式。
-    if broad_total > max_records and affil_keywords:
-        narrowed = build_search_query(author, orcid=orcid, affiliation_keywords=affil_keywords)
+    if broad_total > max_records and narrow_terms:
+        narrowed = build_search_query(author, orcid=orcid, affiliation_keywords=narrow_terms)
         _, narrowed_total = _request(narrowed, 0)
         logger.warning(
             "宽检索命中 %d 条，超过 max_records=%d；已自动加入机构条件收窄至 %d 条。"
@@ -607,41 +617,103 @@ def parse_article(article_xml: str | ET.Element) -> dict:
     }
 
 
-def _name_matches(author: dict, target_parts: list[str]) -> bool:
+# Hyphens (and the Unicode ones a publisher may send) and full stops inside one
+# forename word: 'Wei-Bin' closes up to one name, 'J.-P.' splits into two initials.
+_NAME_PIECES_RE = re.compile(r"[-\u2010\u2011\u2012\u2013.]+")
+
+
+def _fold_name(text: str) -> str:
+    """Lower case, accents off, letters only: 'Wei-Bin' -> 'weibin', 'José' -> 'jose'."""
+    decomposed = unicodedata.normalize("NFKD", str(text or ""))
+    return "".join(ch for ch in decomposed.lower() if ch.isalpha())
+
+
+def _given_words(fore: str, initials: str) -> tuple[list[str], bool]:
+    """A forename as words to compare, and whether it is initials and nothing more.
+
+    'Wei-Bin' is one word ('weibin'), 'Brent R' two ('brent', 'r'), 'J.-P.' two
+    initials. A forename made only of initials — 'W', 'W B', or 'WB' beside the
+    record's Initials 'WB' — and an empty forename with initials beside it come
+    back flagged, because then the first letter is all there is to go on.
     """
-    姓名模糊匹配（支持中文拼音的正反序）。
-    target_parts: ["zhu", "guangwei"] 或 ["guangwei", "zhu"]
+    words: list[str] = []
+    for word in str(fore or "").split():
+        pieces = [piece for piece in (_fold_name(p) for p in _NAME_PIECES_RE.split(word)) if piece]
+        if pieces and all(len(piece) == 1 for piece in pieces):
+            words.extend(pieces)
+        elif pieces:
+            words.append("".join(pieces))
+    folded_initials = _fold_name(initials)
+    if not words:
+        return list(folded_initials), bool(folded_initials)
+    if all(len(word) == 1 for word in words) or "".join(words) == folded_initials:
+        return list("".join(words)), True
+    return words, False
+
+
+def _given_name_matches(wanted: list[str], fore: str, initials: str) -> bool:
+    """Whether a byline's forename can be the given name that was typed.
+
+    Two full forenames have to be the same name. Spaces and hyphens inside it
+    do not matter ('Guang Wei', 'Guang-Wei' and 'Guangwei' are one name), and
+    neither does a middle name or initial that only one side has ('Brent R' is
+    'Brent'); one both sides have must agree, to the initial. A forename that
+    merely contains the typed one, or merely starts with the same letter, is
+    someone else: 'Weibin', 'Weiwei', 'Jianwei' and 'Wenjun' are not 'Wei'.
+
+    Only when one side is initials and nothing more, as older PubMed records
+    are, is the first letter compared and nothing else. A byline with no
+    forename and no initials at all cannot be told apart and is let through.
     """
-    if not target_parts:
-        return False
-
-    last_lower = (author.get("last") or "").lower()
-    fore_lower = (author.get("fore") or "").lower()
-    initials_lower = (author.get("initials") or "").lower()
-
-    def _given_matches(given: str) -> bool:
-        """名字模糊匹配"""
-        return (given in fore_lower
-                or fore_lower in given
-                or (given and initials_lower and given[0] == initials_lower[0]))
-
-    # 正序：target_parts[0] 是姓
-    target_last = target_parts[0]
-    if target_last == last_lower:
-        if len(target_parts) > 1:
-            if _given_matches(target_parts[1]):
-                return True
-        else:
+    mine, mine_initials = _given_words(fore, initials)
+    target, target_initials = _given_words(" ".join(wanted), "")
+    if not mine or not target:
+        return True
+    if not target_initials and len(target) == 1 and len(target[0]) <= 3:
+        typed = target[0]
+        if not set(typed) & set("aeiouy"):
+            # Initials typed as one word, PubMed-style ('Stockwell BR'): no name,
+            # pinyin or otherwise, is written without a vowel.
+            target, target_initials = list(typed), True
+        elif typed == _fold_name(initials):
+            # Typed exactly as this record's initials ('Smith JA' beside JA).
             return True
+    if mine_initials or target_initials:
+        return mine[0][0] == target[0][0]
+    if "".join(mine) == "".join(target):
+        return True
+    if mine[0] != target[0]:
+        return False
+    return all(a == b or ((len(a) == 1 or len(b) == 1) and a[0] == b[0])
+               for a, b in zip(mine[1:], target[1:]))
 
-    # 反序：target_parts[-1] 是姓（如 "Guangwei Zhu"）
-    if len(target_parts) >= 2:
-        reversed_last = target_parts[-1]
-        if reversed_last == last_lower:
-            if _given_matches(target_parts[0]):
-                return True
 
-    return False
+def _name_matches(author: dict, target_parts: list[str]) -> bool:
+    """Whether this byline entry can be the person named, in either name order.
+
+    `target_parts` is the name as typed, split on spaces and lower-cased:
+    ["zhu", "guangwei"] or ["guangwei", "zhu"]. The surname has to be the same
+    word, case, accents, hyphens and spaces aside ('Ou-Yang' is 'Ouyang'); the
+    given name is compared by `_given_name_matches`. A one-word name is a
+    surname and matches on that alone.
+
+    This used to accept any forename that contained the typed given name or
+    shared its first letter, so "Wang Wei" also matched Wang Weibin, Wang
+    Weiwei, Wang Jianwei and every other Wang W — on a live harvest of that
+    name, four in five of the byline slots it accepted were somebody else's,
+    and the identity hints, the role filter and the report all read through it.
+    """
+    parts = [part for part in target_parts if _fold_name(part)]
+    last = _fold_name(author.get("last") or "")
+    if not parts or not last:
+        return False
+    if len(parts) == 1:
+        return _fold_name(parts[0]) == last
+    fore = author.get("fore") or ""
+    initials = author.get("initials") or ""
+    if _fold_name(parts[0]) == last and _given_name_matches(parts[1:], fore, initials):
+        return True
+    return _fold_name(parts[-1]) == last and _given_name_matches(parts[:-1], fore, initials)
 
 
 def _affiliation_matches(affil_text: str, affil_keywords: list[str]) -> tuple[bool, str]:
@@ -939,9 +1011,11 @@ def is_first_or_corresponding(
     orcid = cfg.get("orcid", "")
     require_affil = cfg.get("require_affiliation", True)
 
-    # 如果 target_affiliation 不在关键词列表中，自动加入
-    if target_affiliation and target_affiliation not in affil_keywords:
-        affil_keywords = [target_affiliation] + affil_keywords
+    # 机构名只在一个机构关键词都没有时顶上。给了关键词就按关键词核对：那通常是
+    # 导师所在的科室，再把整所学校加回去，同校别的科室的同名者就又全部放行了。
+    # 画像那边的 roles.evidence_tier 也只读关键词，两边得是同一把尺子。
+    if target_affiliation and not affil_keywords:
+        affil_keywords = [target_affiliation]
 
     pmid = paper.get("pmid", "?")
     title_short = paper.get("title", "")[:50]

@@ -685,7 +685,7 @@ strength:
 | `--orcid 0000-0002-...` | Strongest. One is worth all the rest, and it also enters the search as `[auid]` |
 | `--author-email wangwei@pku.edu.cn` | The advisor's own address, usually on the lab page, matched whole. Short of an ORCID the strongest there is: a namesake at the same university does not share it. Repeatable |
 | `--email-domain your-university.edu.cn` | The corresponding author's domain, matched at a label boundary. Repeatable |
-| `--affiliation-keyword "..."` | Weakest — it fails on same-name colleagues inside one university system. Repeatable, and defaults to whatever `--affiliation` says |
+| `--affiliation-keyword "..."` | Weakest. A university name lets every same-name colleague there through; a department narrows the check to that department. Repeatable, and defaults to whatever `--affiliation` says; once given, it replaces `--affiliation` in the check, while the search still covers `--affiliation` |
 
 `--require-affiliation` turns a non-matching institution from "kept and marked
 unverified" into "rejected".
@@ -700,11 +700,16 @@ before the identity filter — and Section 1 repeats them. Two people sharing a
 name separate there: different addresses, different departments. The playbook:
 
 1. Harvest once with the name and the institution.
-2. Read the address list. Pick the advisor's address — the lab page usually
-   prints it — or the department that is theirs.
-3. Re-run with `--author-email <that address>` (or `--affiliation-keyword
-   "<that department>"`), and add `--require-affiliation` so records that match
-   none of it are rejected instead of kept as bare name matches.
+2. Read the lists. Find the advisor's department, and their address if the
+   lab page prints one.
+3. Re-run with `--affiliation-keyword "<that department>"` and
+   `--require-affiliation`, keeping `--affiliation`: records are checked against
+   the department, so a namesake in another department is rejected instead of
+   kept as a bare name match, while the search still covers the institution.
+   Add `--author-email <that address>` on top if you have it; a record printing
+   it counts whatever its department. The address alone does not keep
+   namesakes out: the institution from `--affiliation` stays in the check and
+   lets everyone at it with the name through.
 
 Never pick an address for the user on frequency alone: the most frequent
 address belongs to whoever publishes most under the name, which is the proxy

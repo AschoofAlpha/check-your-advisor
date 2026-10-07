@@ -286,6 +286,28 @@ check("...with the broad count kept for the record", prov["broad_matched"], 4000
 check("...and the denominator now describes the narrowed query",
       prov["esearch_matched"], 30)
 
+# The narrowing names the institution as well as the keywords. A keyword is what
+# each byline is checked against, often a department's full name, and PubMed's
+# phrase search on a string that long found 2 records on a live run where the
+# institution's own search held at least 9 with that department on the byline.
+# ORed with the institution, the search can only get wider.
+DEPARTMENT = "Department of Cardiology, Example University Hospital"
+fake = FakeNCBI(ids(0, 4000), narrowed=ids(9000, 9030))
+found, prov = harvest(fake, retmax=100, max_records=1000,
+                      identity={"affiliation_keywords": [DEPARTMENT]}, affiliation="Example University")
+narrowed_terms = [call["term"] for call in fake.calls if "[Affiliation]" in call.get("term", "")]
+check_true("a department keyword is ORed with the institution, never searched alone",
+           narrowed_terms and all(f'"Example University"[Affiliation] OR "{DEPARTMENT}"[Affiliation]' in term
+                                  for term in narrowed_terms))
+fake = FakeNCBI(ids(0, 4000), narrowed=ids(9000, 9030))
+found, prov = harvest(fake, retmax=100, max_records=1000,
+                      identity={"affiliation_keywords": ["Example University"]}, affiliation="Example University")
+check("...and an institution that is also the keyword is named once",
+      prov["esearch_term"].count('"Example University"[Affiliation]'), 1)
+fake = FakeNCBI(ids(0, 4000), narrowed=ids(9000, 9030))
+found, prov = harvest(fake, retmax=100, max_records=1000, affiliation="Example University")
+check("...and the institution alone is enough to narrow on", prov["narrowed_by_affiliation"], True)
+
 
 # ======================================================================
 print("\n--- what PubMed does that a clean slice does not ---")

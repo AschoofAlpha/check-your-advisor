@@ -19,6 +19,7 @@ Run: python tests/test_glance.py
 
 from __future__ import annotations
 
+import copy
 import os
 import re
 import sys
@@ -154,6 +155,20 @@ check_true("the co-author clusters are summarised second, with Section 19's own 
            if clusters["n_clusters"] > 1 else
            lines[1].startswith(f"- Co-author clusters with the PI taken out: all {clusters['denominator']} "
                                "records are tied together"))
+# Two clusters and no record left on its own: "and 0 records sharing no co-author"
+# read as a finding, so the clause is dropped when the count is zero.
+split = copy.deepcopy(clean)
+split["metrics"]["s19"] = dict(split["metrics"]["s19"], suppressed=False, n_clusters=2, denominator=9,
+                               largest_size=6, records_in_singletons=0)
+split_line = next((line for line in report.glance_lines(split) if "Co-author clusters" in line), "")
+check("two clusters with no singleton say nothing about singletons",
+      split_line.startswith("Co-author clusters with the PI taken out: 2 over 9 records, the largest holding 6 "
+                            "(Section 19)."), True)
+split["metrics"]["s19"]["records_in_singletons"] = 2
+check_true("...and with two left on their own, say so",
+           "and 2 records sharing no co-author" in next(
+               line for line in report.glance_lines(split) if "Co-author clusters" in line))
+
 filtered = lab()
 filtered["position_filtered"] = True
 filtered_lines = glance_block(report.render_markdown(report.build_report(filtered, {"author_name": TARGET}, None, NOW)))

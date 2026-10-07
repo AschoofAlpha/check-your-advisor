@@ -356,9 +356,75 @@ code, calls, corpus, log = harvest(["--author-email", "wangwei@pkufh.cn", "--req
                                    pmids=[str(i) for i in range(5)], records=records[:5], client=Client([]))
 check("...and --require-affiliation keeps the namesake out", len((corpus or {}).get("papers", [])), 3)
 
+# The run the hints lead to keeps the institution it searched with. Every record
+# below names Peking University, the advisor's three in cardiology and the
+# namesake's two in computer science, so only a department can tell them apart:
+# the filter used to add --affiliation back in beside --affiliation-keyword, and
+# the namesake passed on the university name.
+INSTITUTION = ["--affiliation", "Peking University"]
+DEPARTMENT = ["--affiliation-keyword", "Department of Cardiology, Peking University First Hospital"]
+code, calls, corpus, log = harvest([*INSTITUTION, *DEPARTMENT, "--require-affiliation"],
+                                   pmids=[str(i) for i in range(5)], records=records[:5], client=Client([]))
+check("with the department as the keyword, a namesake in another department stays out",
+      len((corpus or {}).get("papers", [])), 3)
+code, calls, corpus, log = harvest([*INSTITUTION, "--author-email", "wangwei@pkufh.cn", "--require-affiliation"],
+                                   pmids=[str(i) for i in range(5)], records=records[:5], client=Client([]))
+check("...while the address alone lets them in on the university name, as the docs now say",
+      len((corpus or {}).get("papers", [])), 5)
+
 
 # ============================================================
-# 5. OpenAlex candidates say what they work on
+# 5. PubMed unreachable
+# ============================================================
+
+print("\n--- PubMed unreachable ---")
+
+
+def harvest_failing(search_error=None, fetch_error=None):
+    """Run `cmd_fetch` with PubMed's search or detail fetch raising. Returns (code, files, log)."""
+    def search(*args, **kwargs):
+        if search_error is not None:
+            raise search_error
+        return ["1"]
+
+    def fetch(*args, **kwargs):
+        raise fetch_error
+
+    real = (pubmed_api.search_pubmed, pubmed_api.fetch_details)
+    with tempfile.TemporaryDirectory() as tmp:
+        try:
+            pubmed_api.search_pubmed = search
+            pubmed_api.fetch_details = fetch
+            code = cli.cmd_fetch(["--author", AUTHOR, "--output-dir", tmp, "--no-download",
+                                  "--years-back", "5"])
+        finally:
+            pubmed_api.search_pubmed, pubmed_api.fetch_details = real
+            close_log_handlers()
+        files = sorted(os.path.basename(path) for path in glob.glob(os.path.join(tmp, "*"))
+                       if not os.path.basename(path).startswith("download_"))
+        log = "".join(open(path, encoding="utf-8").read()
+                      for path in glob.glob(os.path.join(tmp, "download_*.log")))
+    return code, files, log
+
+
+from urllib.error import HTTPError, URLError  # noqa: E402
+
+for label, kwargs, reason in (
+    ("a refused connection during the search", {"search_error": URLError("connection refused")},
+     "connection refused"),
+    ("an HTTP 503 during the search", {"search_error": HTTPError("u", 503, "Service Unavailable", None, None)},
+     "HTTP 503"),
+    ("a body that is not JSON", {"search_error": ValueError("Expecting value")}, "Expecting value"),
+    ("a timeout while fetching details", {"fetch_error": TimeoutError("timed out")}, "timed out"),
+):
+    code, files, log = harvest_failing(**kwargs)
+    check(f"{label} ends the run with exit code 1, not a traceback", code, 1)
+    check(f"...writes nothing", files, [])
+    check_true(f"...and says why, in a line naming the cause", "PubMed" in log and reason in log)
+
+
+# ============================================================
+# 6. OpenAlex candidates say what they work on
 # ============================================================
 
 print("\n--- candidate topics ---")

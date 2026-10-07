@@ -97,7 +97,7 @@ MESSAGES = {
     'scoring.weights 配置无效，未生成报告: %s': 'Invalid scoring.weights config; no report generated: %s',
     '导师画像：发表记录反映出的「当这位 PI 的学生是什么样」': 'Advisor profile: "what it is like to be this PI\'s student", as the publication record reflects it',
     'output_dir=%s | 输入=%s | PI=%s': 'output_dir=%s | input=%s | PI=%s',
-    '(未指定)': '(not specified)',
+    '(未指定，用语料里记录的姓名)': '(not given; the name recorded in the corpus is used)',
     '综合分权重: %s（报告里会原样印出这张表）': 'Composite score weights: %s (the report prints this table as is)',
     'JSON 配置文件路径（提供 author_identity、advisor 与 scoring.weights 配置）': 'Path to the JSON config file (supplies the author_identity, advisor and scoring.weights settings)',
     '报告输出目录（默认与 fetch 相同：pubmed_results）': 'Report output directory (default the same as fetch: pubmed_results)',

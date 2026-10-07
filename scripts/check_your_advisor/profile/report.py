@@ -725,8 +725,8 @@ def target_name_record_reach(papers: Any, target_name: str) -> tuple[int, int]:
     Counted through `pubmed_api._name_matches`, which is the matcher
     `roles.resolve_pi` builds its candidate list with, so the number Section 1
     prints and the number of records that got a located PI cannot disagree. It
-    accepts either name order and matches a given name against an initial, so
-    this counts what `resolve_pi` would count and not a stricter private rule.
+    accepts either name order, and an initial where the byline carries initials
+    alone, so this counts what `resolve_pi` would count and not a private rule.
 
     Record-level and byline-wide, matching `openalex_id_record_share` and
     `identity_evidence_record_reach`: a record counts once, whichever entry
@@ -2512,9 +2512,9 @@ def _identity_hint_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) 
         en("- printed beside {name} in a first, last or corresponding slot, over the "
            "{records_examined} fetched records where it holds one (counted before the "
            "identity filter): emails {emails}; departments {labels}. Namesakes separate "
-           "here. If one address is the advisor's, re-harvest with `--author-email` set to "
-           "it — the strongest evidence short of an ORCID; failing that, the department is "
-           "the next best `--affiliation-keyword`",
+           "here. To keep the others out, re-harvest with the advisor's department as "
+           "`--affiliation-keyword` and add `--require-affiliation` (the search still covers "
+           "`--affiliation`); if one address is the advisor's, add it with `--author-email` too",
            name=hints.get("name") or en("the name"), records_examined=hints["records_examined"],
            emails=emails, labels=labels),
     ]
@@ -4404,13 +4404,20 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
             "shared co-authors, in one cluster (Section 19).",
             records=clusters.get("denominator", "?")))
     elif clusters and not clusters.get("suppressed") and clusters.get("n_clusters"):
+        single = clusters.get("records_in_singletons", "?")
+        # "and 0 records sharing no co-author" read as a finding where there is none.
         lines.append(en(
             "Co-author clusters with the PI taken out: {n} over {records} records, the largest "
             "holding {largest}, and {single} records sharing no co-author with any other "
             "(Section 19). Clusters in unrelated fields usually mean several people share the "
             "name; read that section before quoting anything here.",
             n=clusters["n_clusters"], records=clusters.get("denominator", "?"),
-            largest=clusters.get("largest_size", "?"), single=clusters.get("records_in_singletons", "?")))
+            largest=clusters.get("largest_size", "?"), single=single) if single != 0 else en(
+            "Co-author clusters with the PI taken out: {n} over {records} records, the largest "
+            "holding {largest} (Section 19). Clusters in unrelated fields usually mean several "
+            "people share the name; read that section before quoting anything here.",
+            n=clusters["n_clusters"], records=clusters.get("denominator", "?"),
+            largest=clusters.get("largest_size", "?")))
 
     roster = metrics.get("s2") or {}
     rows = roster.get("rows") or []

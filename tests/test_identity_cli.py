@@ -72,6 +72,15 @@ check("a config-file list is never silently replaced",
       identity(["--author", "X", "--affiliation", "CLI Value"], base)["affiliation_keywords"],
       ["From Config"])
 
+# The identity filter used to add the institution back on its own, so an
+# institution set only in the config file still verified records while the
+# identity block — which the profile's evidence tiers read — said no keyword
+# was configured. It is seeded here instead, wherever the setting came from.
+base = copy.deepcopy(DEFAULT_CONFIG)
+base["affiliation"] = "Config University"
+check("an institution set in the config file seeds the keyword too",
+      identity(["--author", "X"], base)["affiliation_keywords"], ["Config University"])
+
 
 print("\nThe stronger identifiers are reachable without a config file")
 i = identity(["--author", "X", "--orcid", "0000-0002-6118-8583",

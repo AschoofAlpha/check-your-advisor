@@ -56,6 +56,7 @@ places people talk about an advisor.
 """
 
 import argparse
+import http.client
 import logging
 import os
 import sys
@@ -485,6 +486,23 @@ def parse_compare_args(argv: list[str] | None = None) -> argparse.Namespace:
     return _add_lang(parser).parse_args(argv)
 
 
+# What a PubMed request raises once `_eutils_get` has spent its retries: an HTTP
+# error, a refused or reset connection, a timeout (all OSError), a body cut
+# short (http.client's own exceptions), or something that is not the JSON
+# esearch promises (ValueError). Uncaught, any of them ended `harvest` in a
+# traceback.
+_PUBMED_FAILURES = (OSError, http.client.HTTPException, ValueError)
+
+
+def _failure_reason(exc: BaseException) -> str:
+    """The short reason a network error carries, not its whole repr."""
+    reason = getattr(exc, "reason", None)
+    code = getattr(exc, "code", None)
+    if code is not None:
+        return f"HTTP {code}"
+    return str(reason or exc) or type(exc).__name__
+
+
 def _has_identity_evidence(identity: dict, merge_works: bool = False) -> bool:
     """Whether anything unique to this person will reach the harvested records.
 
@@ -525,9 +543,10 @@ def _log_identity_hints(hints: dict, logger: logging.Logger) -> None:
     if not hints.get("records_examined") or not (hints.get("emails") or hints.get("affiliations")):
         return
     logger.warning(
-        "这 %d 条记录里，「%s」坐在第一/末位/通讯位时，旁边印着下面这些邮箱和单位——同名的不同的人"
-        "会在这里分开。认出导师的那一个，加 --author-email <邮箱> 或 --affiliation-keyword \"<单位>\" 重跑，"
-        "再加 --require-affiliation 把对不上的同名记录挡在语料外：",
+        "这 %d 条记录里，「%s」排在第一、末位或通讯作者时，旁边印着下面这些邮箱和单位，同名的人在这里"
+        "能分开。认出导师后，加 --affiliation-keyword \"<导师的单位>\" 和 --require-affiliation 重跑，"
+        "单位对不上的同名记录就进不了语料（检索范围仍按 --affiliation）。知道导师邮箱的话再加 "
+        "--author-email <邮箱>：",
         hints["records_examined"], hints.get("name", ""),
     )
     for email, count in hints.get("emails") or []:
@@ -598,9 +617,12 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     # the institution on the command line still verified nobody against it and
     # marked every paper "机构未验证". Seeding the keyword from it is what the
     # flag plainly means; an explicit --affiliation-keyword still wins, and a
-    # list configured in the config file is never overwritten.
-    if getattr(args, "affiliation", None) and not identity.get("affiliation_keywords"):
-        identity["affiliation_keywords"] = [args.affiliation]
+    # list configured in the config file is never overwritten. Seeded from the
+    # setting wherever it came from, the config file included: the identity
+    # filter used to add it back on its own, past any keyword, which is how a
+    # department keyword failed to keep a namesake in another department out.
+    if cfg.get("affiliation") and not identity.get("affiliation_keywords"):
+        identity["affiliation_keywords"] = [cfg["affiliation"]]
 
     return cfg
 
@@ -2095,7 +2117,7 @@ def cmd_profile(argv: list[str]):
     logger.info("=" * 60)
     logger.info("导师画像：发表记录反映出的「当这位 PI 的学生是什么样」")
     logger.info("output_dir=%s | 输入=%s | PI=%s",
-                output_dir, json_path, cfg["author_name"] or "(未指定)")
+                output_dir, json_path, cfg["author_name"] or "(未指定，用语料里记录的姓名)")
     logger.info("综合分权重: %s（报告里会原样印出这张表）",
                 ", ".join(f"{name}={value:g}" for name, value in weights.items()))
     logger.info("=" * 60)
@@ -2651,12 +2673,21 @@ def cmd_fetch(argv: list[str]):
         search_provenance.update({"pubmed_searched": False, "years_back": cfg["years_back"]})
         pmids: list[str] = []
     else:
-        pmids = search_pubmed(
-            cfg["author_name"], cfg["years_back"], cfg["api_key"],
-            retmax=cfg.get("retmax", 500), identity=identity_cfg,
-            provenance=search_provenance,
-            max_records=cfg.get("max_records", MAX_RECORDS),
-        )
+        try:
+            pmids = search_pubmed(
+                cfg["author_name"], cfg["years_back"], cfg["api_key"],
+                retmax=cfg.get("retmax", 500), identity=identity_cfg,
+                provenance=search_provenance,
+                max_records=cfg.get("max_records", MAX_RECORDS),
+                affiliation=cfg.get("affiliation", ""),
+            )
+        except _PUBMED_FAILURES as exc:
+            logger.error(
+                "PubMed 检索失败（%s），这次没有写出任何文件。检查网络或代理后重跑；"
+                "导师不在生物医学领域的话，用 --source openalex 就不经过 PubMed。",
+                _failure_reason(exc),
+            )
+            return 1
         if not pmids and not (merge_requested and resolved_id):
             logger.warning("未找到任何论文，请检查作者名拼写。")
             logger.warning(
@@ -2671,7 +2702,14 @@ def cmd_fetch(argv: list[str]):
     all_papers: list[dict] = []
     if pmids:
         logger.info("正在获取 %d 篇论文的详细信息...", len(pmids))
-        all_papers = fetch_details(pmids, cfg["api_key"], cfg["delay_seconds"])
+        try:
+            all_papers = fetch_details(pmids, cfg["api_key"], cfg["delay_seconds"])
+        except _PUBMED_FAILURES as exc:
+            logger.error(
+                "从 PubMed 取论文详情时出错（%s），这次没有写出任何文件，稍后重跑即可。",
+                _failure_reason(exc),
+            )
+            return 1
         logger.info("成功解析 %d 篇", len(all_papers))
 
         # What the bylines print beside this name, before the filter chooses
