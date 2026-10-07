@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "check-your-advisor"
 version = "0.3.1"
-description = "Read what PubMed records about a researcher and report it back as facts with denominators — first-author slots, time to a first slot, turnover, byline position. 查导师：把发表记录读成带分母的事实，不替你下结论。"
+description = "Read what PubMed or OpenAlex records about a researcher and report it back as facts with denominators — first-author slots, time to a first slot, turnover, byline position. 查导师：把发表记录读成带分母的事实，不替你下结论。"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = "MIT"
@@ -13,6 +13,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "AschoofAlpha" }]
 keywords = [
     "pubmed",
+    "openalex",
     "advisor",
     "graduate-school",
     "bibliometrics",

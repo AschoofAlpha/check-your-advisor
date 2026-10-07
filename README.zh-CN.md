@@ -282,12 +282,20 @@ pip install check-your-advisor
 check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
 ```
 
-当 Claude Code 插件用 —— 仓库本身就是一个插件市场，在 Claude Code 里两条命令装好，
-以后用 `/plugin marketplace update check-your-advisor` 更新：
+当 Claude Code 插件用 —— 仓库本身就是一个插件市场，在 Claude Code 里两条命令装好：
 
 ```text
 /plugin marketplace add AschoofAlpha/check-your-advisor
 /plugin install check-your-advisor@check-your-advisor
+```
+
+以后要更新，在终端里先刷新插件市场、再更新插件，然后开一个新会话（或者运行
+`/reload-plugins`）。插件的版本号写在 `plugin.json` 里，所以更新是随每次发版到来的，
+不是随每次提交：
+
+```bash
+claude plugin marketplace update check-your-advisor
+claude plugin update check-your-advisor@check-your-advisor
 ```
 
 或者当个人技能用 —— clone 到技能加载器会看的位置，让 `SKILL.md` 和代码待在一起，

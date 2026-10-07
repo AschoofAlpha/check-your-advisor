@@ -339,12 +339,20 @@ check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
 ```
 
 As a Claude Code plugin — the repository is its own marketplace, so two
-commands inside Claude Code install it, and `/plugin marketplace update
-check-your-advisor` picks up later releases:
+commands inside Claude Code install it:
 
 ```text
 /plugin marketplace add AschoofAlpha/check-your-advisor
 /plugin install check-your-advisor@check-your-advisor
+```
+
+To update later, refresh the marketplace and then the plugin, from a shell, and
+start a new session (or run `/reload-plugins`). The plugin's version is pinned in
+`plugin.json`, so an update arrives with each release rather than each commit:
+
+```bash
+claude plugin marketplace update check-your-advisor
+claude plugin update check-your-advisor@check-your-advisor
 ```
 
 Or as a personal skill — clone it where the skill loader looks, so `SKILL.md`
