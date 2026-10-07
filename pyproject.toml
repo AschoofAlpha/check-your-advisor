@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "check-your-advisor"
 version = "0.3.1"
-description = "Read what PubMed or OpenAlex records about a researcher and report it back as facts with denominators — first-author slots, time to a first slot, turnover, byline position. 查导师：把发表记录读成带分母的事实，不替你下结论。"
+description = "Looks up a PhD advisor's papers in PubMed and OpenAlex and works out how long students wait for a first-author paper, who gets them, and how long people stay. 选导师前查课题组用的。"
 readme = { file = "README.md", content-type = "text/markdown" }
 requires-python = ">=3.10"
 license = "MIT"

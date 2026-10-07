@@ -1,6 +1,6 @@
 {
   "name": "check-your-advisor",
-  "description": "查导师 · Advisor due diligence from the publication record, one plugin.",
+  "description": "查导师：选导师前查一下课题组。For checking a PhD advisor's lab before you join.",
   "owner": {
     "name": "AschoofAlpha",
     "url": "https://github.com/AschoofAlpha"
@@ -9,7 +9,7 @@
     {
       "name": "check-your-advisor",
       "source": ".",
-      "description": "查导师：把发表记录读成带分母的事实，不替你下结论。Read what PubMed and OpenAlex record about a PI and report it back as counts with their denominators.",
+      "description": "选导师前查课题组用的。输入导师名字，从 PubMed 和 OpenAlex 找出导师的论文，算出学生多久能发第一篇一作、一作主要给了谁、一般待几年，生成中英文报告。什么学科都能查。Looks up a PhD advisor's papers in PubMed and OpenAlex and works out how long students wait for a first-author paper, who gets them, and how long people stay.",
       "category": "research",
       "tags": ["pubmed", "openalex", "advisor", "graduate-school", "bibliometrics"]
     }
