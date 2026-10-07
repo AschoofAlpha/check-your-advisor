@@ -622,8 +622,9 @@ check("one h1", PAGE.count("<h1"), 1)
 # and 20 student evaluations) and the embedded-JSON block. 17, 18 and 20 are
 # rendered even with no table supplied, because a missing section reads as a
 # question nobody asked; 19 needs no table and renders always, printing why it
-# did not partition when the corpus is below its floor.
-check("one h2 per section plus the data block", PAGE.count("<h2"), 22)
+# did not partition when the corpus is below its floor. One more h2 heads the
+# summary card above the section list.
+check("one h2 per section plus the data block and the summary card", PAGE.count("<h2"), 23)
 check_true("a skip link is the first focusable element",
            PAGE.index('class="skip"') < PAGE.index("<header"))
 check_true("wide figures are keyboard scrollable", 'tabindex="0"' in PAGE)

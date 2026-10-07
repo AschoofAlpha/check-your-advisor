@@ -8,19 +8,23 @@
 *[English](README.md)*
 
 你要选硕导或博导。手里只有一个名字、一个实验室自己写的主页，没有任何办法核实。
-这个工具去 PubMed 把这个人的发表记录读出来，还给你一堆**带分母的事实**。
+这个工具去 PubMed 把这个人的发表记录读出来 —— 导师不做生物医学的话改读 OpenAlex，
+那里覆盖所有学科 —— 还给你一堆**带分母的事实**。
 
 **它不告诉你这个导师好不好。**那是你的判断。它做的是把传闻换成数字，
 并且每个数字后面都跟着"从多少人/多少篇里算出来的"。
 
 ```bash
-python scripts/run.py harvest --author "Wang Wei" --orcid 0000-0002-1825-0097 \
+python3 scripts/run.py harvest --author "Wang Wei" --orcid 0000-0002-1825-0097 \
     --years-back 10 --output-dir ./record --no-download
-python scripts/run.py cite    --output-dir ./record
-python scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
+python3 scripts/run.py cite    --output-dir ./record
+python3 scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
 ```
 
 三条命令，一份 HTML 报告 —— 中英文各写一份，两份上的数字一模一样。不需要装任何东西，纯标准库。
+
+报告开头是一页速览：十来行，每行一个带分母的数，并注明出自哪一节，有提示的话提示排最前。
+下面二十节给出每个数的定义，以及它不能说明什么。
 
 ## 它回答什么
 
@@ -74,14 +78,22 @@ OpenAlex，这篇论文的引用数在**所有同领域同年发表的论文**�
 | 参数 | 强度 |
 |---|---|
 | `--orcid 0000-0002-...` | 最强，一个顶其余全部 |
-| `--email-domain your-university.edu.cn` | 通讯作者邮箱域名，可重复给 |
+| `--author-email wangwei@pku.edu.cn` | 导师本人的邮箱（课题组主页上那个），整个地址精确匹配。没有 ORCID 时这是最强的：同一所学校里的同名者不会共用一个邮箱。可重复给 |
+| `--email-domain your-university.edu.cn` | 通讯作者邮箱域名，按域名层级边界匹配，可重复给 |
 | `--affiliation-keyword "..."` | 最弱 —— 同一个大学系统里的同名同事挡不住 |
 | `--resolve-openalex` / `--openalex-author-id A...` | OpenAlex 自己的作者聚类。记为 OpenAlex 的断言，不记为你的 |
 
 `--resolve-openalex` 会把 OpenAlex 里所有用这个名字发表的作者逐条印出来，
-带作者 ID、ORCID、机构履历和作品数。**只有一位候选时才采用；两位及以上时全部列出、
+带作者 ID、ORCID、机构履历、作品数和主要研究方向 —— 同一所学校里的两个同名者，
+往往看研究方向最快分得开。**只有一位候选时才采用；两位及以上时全部列出、
 一个都不选** —— 按作品数挑等于用产量代替身份，而且事后报告里看不出做过这个选择。
 认出是哪一位后加 `--openalex-author-id` 重跑即可。
+
+**既没有 ORCID 也不知道邮箱？** 那 `harvest` 会把署名里这个名字旁边出现过的邮箱和院系
+列出来 —— 按出现次数排，在身份过滤之前统计 —— 第 1 节也会再印一遍。几个同名的人
+在这张表里自然分成几堆。认出导师的那一堆，用 `--author-email` 重跑（或者把院系当
+`--affiliation-keyword`）；再加 `--require-affiliation`，同名者的记录就直接挡在语料外，
+而不是标成"只有姓名匹配"留在里面。
 
 完全没配身份证据时，报告**照常生成**，但第 0、1、19 节顶部各挂一个提示框，
 写明是哪一条、观测到的数是多少、怎么修；第 14 节如实记下"这一条以前是拒绝出报告的"；
@@ -98,11 +110,25 @@ OpenAlex，这篇论文的引用数在**所有同领域同年发表的论文**�
 两个同名的人没有理由共享任何第三者。它**不设阈值** —— 实测数据不支持任何阈值，
 所以它只把簇和各簇的期刊印出来，判断交给你。通常一眼就能看出来。
 
-## 想要第二个来源
+## 不做生物医学：`--source openalex`
 
 ```bash
-python scripts/run.py harvest --author "Wang Wei" \
-    --openalex-author-id A5023888391 --openalex-works --output-dir ./record
+python3 scripts/run.py harvest --author "Wang Wei" --affiliation "Tsinghua University" \
+    --source openalex --years-back 10 --output-dir ./record --no-download
+```
+
+PubMed 只收医学和生命科学，工科、计算机、物理、化学、社科的导师在那里几乎查不到 ——
+常见姓名搜回来的全是同名者。`--source openalex` 跳过 PubMed，直接从覆盖全学科的
+OpenAlex 建语料。它按姓名和机构找作者：只有一位候选就采用；有好几位就连同各自的机构
+和研究方向一起列出来然后停下，你用 `--openalex-author-id` 选定一位再跑。第 1 节会写明
+没有检索 PubMed，并说明页面上其他地方的"PubMed 记录"应读作"OpenAlex 作品"。
+PubMed 按这个名字一篇都搜不到时，`harvest` 会直说，并提示改用这个参数。
+
+## 两个来源都要：`--source both`
+
+```bash
+python3 scripts/run.py harvest --author "Wang Wei" \
+    --openalex-author-id A5023888391 --source both --output-dir ./record
 ```
 
 把该作者 ID 名下的 OpenAlex 作品拉回来并入 PubMed 语料，去重顺序是
@@ -121,18 +147,23 @@ DOI → PMID → 归一化标题+年份。两边都有的那篇以 PubMed 的记
 都走条款允许的免密钥公开接口，都单独成带日期的文件，绝不写回你手填的表。）
 
 ```bash
-python scripts/run.py journal-worklist --output-dir ./record
+python3 scripts/run.py journal-worklist --output-dir ./record
 ```
 
 它生成的 CSV **只包含这份语料实际用到的期刊** —— 通常二十来本，不是全球两万本 ——
 ISSN 和篇数已经填好，指标列留空。你从任何有权限的来源填完，然后：
 
 ```bash
-python scripts/run.py profile --output-dir ./record \
+python3 scripts/run.py profile --output-dir ./record \
     --journal-table ./record/journal_worklist_*.csv \
     --thesis-roster ./record/theses.csv \
     --evaluation-table ./record/evaluations.csv
 ```
+
+在这些之前，`journal-risk`（见下文）不用任何表就已经把期刊层面的数印在页面上了：
+OpenAlex 自己算的两年平均被引（它那边与影响因子对应的公开指标）和 h 指数，
+逐刊列在第 18 节的一张单独的表里。这些是 OpenAlex 在它收录范围内算出来的，
+不是 JCR 或中科院的数字，也绝不会填进那几列。
 
 期刊表有两列是**必填**：`版本来源`（官方版/新锐版/民间版/JCR）和 `数据获取日期`。
 少了这两列，过两年那个分区数字就无法追溯。同一本刊查到两个版本就写两行，
@@ -145,6 +176,9 @@ python scripts/run.py profile --output-dir ./record \
 毕业名单是三张表里最重要的那张。从学位论文库导出该导师名下的题录，
 它能算出 PubMed 结构上不可能给的数字：**有多少毕业生一篇被收录的论文都没有。**
 记得加一列姓名拼音，否则中文名单和英文署名根本对不上。
+从知网或万方直接导出的文件没有 `库来源` 和 `导出日期` 这两列 —— 它们描述的是这次导出，
+不是哪篇论文 —— 所以在命令行上给一次就行：`--thesis-source CNKI --thesis-exported 2026-10-07`，
+第 17 节会注明这两项来自命令行。`Author-作者` 这样的中英双语表头，取哪一半都认。
 另外，入学后没读完就走的人在任何库里都没有 —— 这张表只是把缺口缩小，没有补上。
 
 学生评价那张表完全靠你自己收集，没有对应的待查清单命令：
@@ -168,7 +202,7 @@ python scripts/run.py profile --output-dir ./record \
 全都是在四分之一的语料上算出来的，**而且页面上看不出来**。
 
 ```bash
-python scripts/run.py profile --output-dir ./record     --chinese-records ./record/cnki.csv
+python3 scripts/run.py profile --output-dir ./record     --chinese-records ./record/cnki.csv
 ```
 
 必填七列：`篇名`、`作者`、**`作者拼音`**、`期刊`、`发表年份`、`数据来源`、`数据获取日期`。
@@ -191,7 +225,7 @@ UnicodeDecodeError。
 ## 半年后再看一次：`diff`
 
 ```bash
-python scripts/run.py diff ./record-2026-03 ./record-2026-09
+python3 scripts/run.py diff ./record-2026-03 ./record-2026-09
 ```
 
 第一个目录是旧的，第二个是新的。出：新增几篇、谁第一次出现、一作名额落在谁头上。
@@ -211,7 +245,7 @@ python scripts/run.py diff ./record-2026-03 ./record-2026-09
 关于一本刊，确实有三样东西是能免费查到的，一条命令就够：
 
 ```bash
-python scripts/run.py journal-risk --output-dir ./record
+python3 scripts/run.py journal-risk --output-dir ./record
 ```
 
 DOAJ 收录状态、Crossref 元数据完整度、OpenAlex 刊记录，覆盖语料里每一本带 ISSN
@@ -248,12 +282,24 @@ pip install check-your-advisor
 check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
 ```
 
-当 Claude Code 技能用 —— clone 到技能加载器会看的位置，让 `SKILL.md` 和代码待在一起：
+当 Claude Code 插件用 —— 仓库本身就是一个插件市场，在 Claude Code 里两条命令装好，
+以后用 `/plugin marketplace update check-your-advisor` 更新：
+
+```text
+/plugin marketplace add AschoofAlpha/check-your-advisor
+/plugin install check-your-advisor@check-your-advisor
+```
+
+或者当个人技能用 —— clone 到技能加载器会看的位置，让 `SKILL.md` 和代码待在一起，
+更新时在那个目录里 `git pull`：
 
 ```bash
 git clone https://github.com/AschoofAlpha/check-your-advisor.git \
     ~/.claude/skills/check-your-advisor
 ```
+
+两种装法下，技能都通过 `${CLAUDE_SKILL_DIR}` 找到自己的脚本，并用 `python3` 运行；
+只有 `python` 的机器上改用 `python`。
 
 也可以 clone 下来直接跑 `scripts/run.py`，它是唯一入口，完全不用装。
 
@@ -284,7 +330,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-36 个文件 5127 条断言（装了 PyMuPDF 时；没装时 5124 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-06 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
+38 个文件 5232 条断言（装了 PyMuPDF 时；没装时 5229 条，三条需要真实 PDF 文件的用例会自己跳过；2026-10-07 用上面第一条命令实测）。上面第一条命令每次跑都会重测本机能测出的那个数，对不上就红，所以这是数字而不是一句承诺。第二条命令会装一个
 import hook，在每个测试进程里屏蔽
 `requests`、`urllib3`、`pandas`、`numpy`、`matplotlib`、`fitz`、`openpyxl`。
 这是"不需要装东西"这句话唯一的保证，而不是只是嘴上说说：

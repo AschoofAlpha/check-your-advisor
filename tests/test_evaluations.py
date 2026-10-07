@@ -656,8 +656,8 @@ check_true("...and each statement with its source",
            "来源 知乎" in markdown and "获取日期 2026-08-20" in markdown)
 
 page = html_report.render_html(with_table, {})
-check("one h2 per section, section 20 included",
-      page.count("<h2"), len(with_table["sections"]) + 1)
+check("one h2 per section, section 20 included, plus the data block and the summary card",
+      page.count("<h2"), len(with_table["sections"]) + 2)
 check_true("section 20 has its own anchor", 'id="s20"' in page)
 check_true("...and is linked from the table of contents", 'href="#s20"' in page)
 segment = page.split('id="s20"', 1)[1].split("</section>", 1)[0]

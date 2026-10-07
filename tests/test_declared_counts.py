@@ -282,21 +282,80 @@ check_true(f"description + when_to_use fit the {SKILL_LISTING_CAP}-character ski
            f" (now {_listing})  [shorten SKILL.md's description; the detail belongs in its body]",
            0 < _listing <= SKILL_LISTING_CAP)
 
+# Where the skill finds its own script. `${CLAUDE_PLUGIN_ROOT}` is substituted
+# only in a plugin skill (https://code.claude.com/docs/en/skills, "Available
+# string substitutions"), and README.md also installs this as a personal skill by
+# cloning it into ~/.claude/skills, where every command spelled with it ran
+# `python "/scripts/run.py"` and failed. `${CLAUDE_SKILL_DIR}` is the directory
+# SKILL.md sits in under every kind of install, and scripts/ sits beside it.
+_skill_text = text("SKILL.md")
+check("SKILL.md never names ${CLAUDE_PLUGIN_ROOT}, which a personal-skill install"
+      " leaves unsubstituted  [use ${CLAUDE_SKILL_DIR}]",
+      _skill_text.count("CLAUDE_PLUGIN_ROOT"), 0)
+check("every ${CLAUDE_SKILL_DIR}/ path SKILL.md names exists beside it",
+      sorted({path for path in re.findall(r"\$\{CLAUDE_SKILL_DIR\}/([^\"\s`]+)", _skill_text)
+              if not (REPO / path).exists()}), [])
+# Stock macOS and Ubuntu have `python3` and no `python`, so the body says
+# `python3`; Windows installs often have only `python`, so both are pre-approved.
+check("SKILL.md tells a model to run python3, never a bare `python` stock macOS and Ubuntu lack",
+      [line.strip() for line in _skill_lines[_fm_end:] if line.strip().startswith("python ")], [])
+
 # The pre-approval matches command text as written, quotes included, so it is
 # only worth having while it is spelled exactly the way SKILL.md tells a model to
-# run the tool. A rule naming a script that moved, or a body that switched to
-# `python3`, would fail to match and nothing would say so.
+# run the tool. A rule naming a script that moved, or a body that switched
+# interpreter, would fail to match and nothing would say so.
 _rules = re.findall(r"Bash\((.*?) \*\)", _fields.get("allowed-tools", ""))
-check_true("allowed-tools pre-approves the skill's own entry point", _rules)
+check("allowed-tools pre-approves the entry point under python3 and under python",
+      sorted(rule.split(" ", 1)[0] for rule in _rules), ["python", "python3"])
 for _rule in _rules:
-    _script = re.search(r"\$\{CLAUDE_PLUGIN_ROOT\}/([^\"\s]+)", _rule)
+    _script = re.search(r"\$\{CLAUDE_SKILL_DIR\}/([^\"\s]+)", _rule)
     check_true(f"the script {_rule!r} pre-approves exists in this repository",
                _script and (REPO / _script.group(1)).is_file())
-    _invocations = [line.strip() for line in _skill_lines[_fm_end:]
-                    if _script and _script.group(1) in line and line.strip().startswith("python")]
-    check(f"every SKILL.md command running {_script.group(1) if _script else '?'} is spelled the"
-          f" way the rule matches  [edit the command or the rule; they must agree]",
-          [line for line in _invocations if not line.startswith(_rule + " ")], [])
+_invocations = [line.strip() for line in _skill_lines[_fm_end:]
+                if "scripts/run.py" in line and line.strip().startswith("python")]
+check_true("SKILL.md runs the entry point somewhere", _invocations)
+check("every SKILL.md command running scripts/run.py is spelled the way a rule matches"
+      "  [edit the command or the rule; they must agree]",
+      [line for line in _invocations if not any(line.startswith(rule + " ") for rule in _rules)], [])
+
+
+# ======================================================================
+# The plugin install: .claude-plugin/marketplace.json
+# ======================================================================
+#
+# `/plugin marketplace add owner/repo` reads `.claude-plugin/marketplace.json`
+# and nothing else; a repository with only plugin.json could not be added, so
+# the plugin install README.md describes did not exist.
+# https://code.claude.com/docs/en/plugins/marketplace-reference.
+
+print("\n[plugin] the marketplace file the README's /plugin commands read")
+
+_MARKET_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+_marketplace_path = REPO / ".claude-plugin" / "marketplace.json"
+check_true("the repository is its own marketplace", _marketplace_path.is_file())
+_market = json.loads(_marketplace_path.read_text(encoding="utf-8")) if _marketplace_path.is_file() else {}
+_plugin_manifest = json.loads((REPO / ".claude-plugin" / "plugin.json").read_text(encoding="utf-8"))
+check("marketplace.json carries the three required fields",
+      sorted(key for key in ("name", "owner", "plugins") if key not in _market), [])
+check_true("...a marketplace name Claude Code can install from",
+           _MARKET_NAME.fullmatch(str(_market.get("name", ""))) and ".." not in str(_market.get("name")))
+check_true("...and an owner with a name", isinstance(_market.get("owner"), dict) and _market["owner"].get("name"))
+_entries = [entry for entry in _market.get("plugins", []) if entry.get("name") == _plugin_manifest["name"]]
+check("it lists this plugin once, under plugin.json's name", len(_entries), 1)
+_entry = _entries[0] if _entries else {}
+check("...fetched from the repository root, where plugin.json and SKILL.md are",
+      _entry.get("source") in (".", "./"), True)
+check_true("...where a root SKILL.md loads as the plugin's one skill",
+           (REPO / "SKILL.md").is_file() and not (REPO / "skills").exists())
+# plugin.json wins over an entry's version and `claude plugin validate` warns, so
+# a version here would be a fourth copy that can only drift.
+check("...with no version of its own beside plugin.json's", "version" in _entry, False)
+for _readme in ("README.md", "README.zh-CN.md"):
+    _installs = re.findall(r"/plugin install (\S+)@(\S+)", text(_readme))
+    check(f"{_readme}'s /plugin install names this plugin and this marketplace",
+          sorted(set(_installs)), [(_plugin_manifest["name"], _market.get("name"))])
+    check_true(f"{_readme} adds this repository as the marketplace",
+               "/plugin marketplace add AschoofAlpha/check-your-advisor" in text(_readme))
 
 
 # ======================================================================

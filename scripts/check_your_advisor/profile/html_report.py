@@ -70,7 +70,7 @@ from pathlib import Path
 from typing import Any
 
 from ..i18n import en, language, report_suffix, using
-from .report import STRATUM_LABEL, json_record
+from .report import GLANCE_LEDE, STRATUM_LABEL, glance_lines, json_record
 
 # Figure id -> (report section id, caveat ids that travel with the figure).
 # The caveat ids are the visual spec's assignment, not the section's own list:
@@ -626,6 +626,20 @@ def render_html(report: Mapping[str, Any], charts: Any = None) -> str:
         return _render_html(report, charts)
 
 
+def _render_glance(report: Mapping[str, Any]) -> str:
+    """The summary card above the section list: the same lines the Markdown page opens with."""
+    lines = glance_lines(report)
+    if not lines:
+        return ""
+    return "".join([
+        '<section class="glance" id="glance" aria-labelledby="glance-h">',
+        f'<h2 id="glance-h">{_esc(en("At a glance"))}</h2>',
+        f'<p class="lede">{_inline(GLANCE_LEDE())}</p>',
+        "<ul>", "".join(f"<li>{_inline(line)}</li>" for line in lines), "</ul>",
+        "</section>",
+    ])
+
+
 def _render_html(report: Mapping[str, Any], charts: Any) -> str:
     name = str(report.get("author_name") or "").strip() or en("(unnamed researcher)")
     title = en("Observed publication pattern — {name}", name=name)
@@ -677,6 +691,7 @@ def _render_html(report: Mapping[str, Any], charts: Any) -> str:
         parts.append(_render_refusal(report))
     else:
         caveat_ids = _caveat_index(report)
+        parts.append(_render_glance(report))
         parts.append(_render_nav(sections))
         parts.append('<main id="main">')
         parts += [_render_section(section, report, bundle, caveat_ids) for section in sections]
@@ -733,6 +748,10 @@ body{margin:0;background:var(--bg);color:var(--ink);font-size:1rem;line-height:1
 header.page{padding:1.5rem 1rem .9rem;border-bottom:3px solid var(--ink)}
 h1{font-size:1.5rem;margin:0 0 .4rem;line-height:1.25}
 .stamp{margin:0;color:var(--muted);font-size:.85rem;max-width:78ch}
+section.glance{max-width:1140px;margin:0 auto;padding:1rem 1rem 1.1rem;border-bottom:3px solid var(--ink)}
+section.glance ul{max-width:84ch;padding-left:1.2rem}
+section.glance li{margin:.25rem 0}
+section.glance .lede{color:var(--muted);font-size:.9rem;max-width:84ch}
 nav.toc{position:sticky;top:0;z-index:2;background:var(--bg);border-bottom:1px solid var(--rule);
  padding:.4rem 1rem}
 nav.toc ol{list-style:none;display:flex;flex-wrap:wrap;gap:.1rem .9rem;margin:0;padding:0;font-size:.8rem}

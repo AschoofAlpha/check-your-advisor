@@ -9,21 +9,26 @@
 
 You are choosing a PhD or master's advisor. You have a name, a lab page written
 by the lab, and no way to check any of it. This reads what PubMed records about
-that person and reports it back as facts with denominators.
+that person — or OpenAlex, which covers every field, for an advisor outside
+biomedicine — and reports it back as facts with denominators.
 
 **It does not tell you whether the advisor is good.** That judgement stays
 yours. What it does is replace hearsay with counts that carry the population
 they were counted over.
 
 ```bash
-python scripts/run.py harvest --author "Wang Wei" --orcid 0000-0002-1825-0097 \
+python3 scripts/run.py harvest --author "Wang Wei" --orcid 0000-0002-1825-0097 \
     --years-back 10 --output-dir ./record --no-download
-python scripts/run.py cite    --output-dir ./record
-python scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
+python3 scripts/run.py cite    --output-dir ./record
+python3 scripts/run.py profile --pi-name "Wang Wei" --output-dir ./record
 ```
 
 Three commands, one HTML report — written twice, in English and in Chinese, with the same
 numbers on both. Nothing to install: the standard library only.
+
+The report opens with a one-page summary: a dozen lines, each a count with its
+denominator and the section it came from, warnings first. The twenty sections
+below it define every number and say what it cannot mean.
 
 ## What it answers
 
@@ -88,16 +93,27 @@ strength:
 | Flag | Strength |
 |---|---|
 | `--orcid 0000-0002-...` | Strongest. One is worth all the rest |
-| `--email-domain your-university.edu.cn` | The corresponding author's address. Repeatable |
+| `--author-email wangwei@pku.edu.cn` | The advisor's own address, from the lab page, matched whole. Short of an ORCID the strongest there is: a namesake at the same university does not share it. Repeatable |
+| `--email-domain your-university.edu.cn` | The corresponding author's domain, matched at a label boundary. Repeatable |
 | `--affiliation-keyword "..."` | Weakest — it fails on same-name colleagues inside one university system |
 | `--resolve-openalex` / `--openalex-author-id A...` | OpenAlex's own author clustering. Recorded as OpenAlex's assertion, never as yours |
 
 `--resolve-openalex` prints every OpenAlex author publishing under this name,
-with its id, ORCID, institution history and works count. **One candidate is
+with its id, ORCID, institution history, works count and top research topics —
+two people sharing a name at one university are usually told apart fastest by
+what they work on. **One candidate is
 adopted; two or more are listed and none is adopted** — picking the most
 prolific one would settle an identity question on a proxy and leave no sign in
 the report that a choice had been made. Re-run with `--openalex-author-id` once
 you recognise the right one.
+
+**No ORCID and no address?** `harvest` then lists the email addresses and
+departments the bylines print beside the name — most frequent first, counted
+before the identity filter — and Section 1 repeats the list. Different people
+sharing the name separate there. Pick the advisor's and re-run with
+`--author-email` (or the department as `--affiliation-keyword`); add
+`--require-affiliation` to keep the namesakes' records out of the corpus rather
+than in it, marked as name matches.
 
 If the harvest recorded no evidence at all, the report still renders — with a
 warning box at the top of Sections 0, 1 and 19 naming the condition, the numbers
@@ -122,11 +138,29 @@ threshold — the measurements do not support one, and the README of a tool like
 this should not pretend otherwise — it prints the clusters and their journals
 and hands the reading to you. It is usually not subtle.
 
-## A second source, if you want one
+## Outside biomedicine: `--source openalex`
 
 ```bash
-python scripts/run.py harvest --author "Wang Wei" \
-    --openalex-author-id A5023888391 --openalex-works --output-dir ./record
+python3 scripts/run.py harvest --author "Wang Wei" --affiliation "Tsinghua University" \
+    --source openalex --years-back 10 --output-dir ./record --no-download
+```
+
+PubMed indexes medicine and the life sciences, so an advisor in engineering,
+computer science, physics, chemistry or the social sciences has little or
+nothing there — and a search by a common name returns only namesakes.
+`--source openalex` skips PubMed and builds the corpus from OpenAlex, which
+covers every field. It looks the author up by name and institution: one
+candidate is adopted, several are listed with their institutions and topics and
+the run stops, so you can pick one with `--openalex-author-id`. Section 1 then
+says PubMed was not searched and that "PubMed record" elsewhere on the page
+means "OpenAlex work". When a PubMed search under the name comes back empty,
+`harvest` says so and points at this flag.
+
+## Both sources: `--source both`
+
+```bash
+python3 scripts/run.py harvest --author "Wang Wei" \
+    --openalex-author-id A5023888391 --source both --output-dir ./record
 ```
 
 Pulls the works OpenAlex files under that author id and merges them into the
@@ -149,7 +183,7 @@ it, is citation counts and the journal risk signals in the next section — both
 into their own dated files, never back into a table you filled in.)
 
 ```bash
-python scripts/run.py journal-worklist --output-dir ./record
+python3 scripts/run.py journal-worklist --output-dir ./record
 ```
 
 That writes a CSV holding **only the journals this corpus actually uses** —
@@ -158,11 +192,17 @@ with ISSN and paper count, indicator columns blank. Fill it from whichever
 source you have access to, then:
 
 ```bash
-python scripts/run.py profile --output-dir ./record \
+python3 scripts/run.py profile --output-dir ./record \
     --journal-table ./record/journal_worklist_*.csv \
     --thesis-roster ./record/theses.csv \
     --evaluation-table ./record/evaluations.csv
 ```
+
+Before any of that, `journal-risk` (below) already puts journal-level numbers on
+the page with no table at all: OpenAlex's 2-year mean citedness — its open
+counterpart of an impact factor — and h-index, per journal, in a table of their
+own in Section 18. They are OpenAlex's computations over what it indexes, not
+JCR or CAS figures, and never fill those columns.
 
 Two columns are **required** in the journal table: `版本来源` (which edition —
 official, rising-star, folk, or JCR) and `数据获取日期`. Without them a
@@ -173,6 +213,10 @@ The graduate roster is the most important of the three. Export the advisor's
 supervised theses from a degree library and it produces the number PubMed
 structurally cannot: **how many graduates have no indexed paper at all.** Add a
 romanised-name column or the Chinese roster will not match the English bylines.
+A file exported straight from CNKI or 万方 carries neither `库来源` nor `导出日期`
+— they describe the export, not a thesis — so give them once on the command line,
+`--thesis-source CNKI --thesis-exported 2026-10-07`; Section 17 says they came from
+there. Bilingual headers such as `Author-作者` are read through either half.
 Note that people who enrolled and left before finishing are in no library
 either — the roster narrows the missing group, it does not close it.
 
@@ -199,7 +243,7 @@ makes "records per year", the first-author distribution and the turnover figures
 all statements about a quarter of the work, **and the page gives no sign of it**.
 
 ```bash
-python scripts/run.py profile --output-dir ./record     --chinese-records ./record/cnki.csv
+python3 scripts/run.py profile --output-dir ./record     --chinese-records ./record/cnki.csv
 ```
 
 Seven required columns; a missing one is named at load time rather than skipped.
@@ -224,7 +268,7 @@ denominators are printed separately rather than summed.
 ## Looking again six months later: `diff`
 
 ```bash
-python scripts/run.py diff ./record-2026-03 ./record-2026-09
+python3 scripts/run.py diff ./record-2026-03 ./record-2026-09
 ```
 
 Older directory first. Reports what is in one corpus and not the other, who
@@ -251,7 +295,7 @@ Three things about a journal *are* free to look up, and one command collects
 them:
 
 ```bash
-python scripts/run.py journal-risk --output-dir ./record
+python3 scripts/run.py journal-risk --output-dir ./record
 ```
 
 DOAJ indexing status, Crossref metadata deposit coverage and OpenAlex's source
@@ -294,13 +338,25 @@ pip install check-your-advisor
 check-your-advisor harvest --author "Wang Wei" --orcid 0000-0002-1825-0097
 ```
 
-As a Claude Code skill — clone it where the skill loader looks, so `SKILL.md`
-lands beside the code:
+As a Claude Code plugin — the repository is its own marketplace, so two
+commands inside Claude Code install it, and `/plugin marketplace update
+check-your-advisor` picks up later releases:
+
+```text
+/plugin marketplace add AschoofAlpha/check-your-advisor
+/plugin install check-your-advisor@check-your-advisor
+```
+
+Or as a personal skill — clone it where the skill loader looks, so `SKILL.md`
+lands beside the code, and `git pull` there to update:
 
 ```bash
 git clone https://github.com/AschoofAlpha/check-your-advisor.git \
     ~/.claude/skills/check-your-advisor
 ```
+
+Either way the skill finds its own script through `${CLAUDE_SKILL_DIR}`, and calls
+`python3`, falling back to `python` where only that exists.
 
 Or run `scripts/run.py` straight out of a clone; it is the single entry point
 and needs no installation at all.
@@ -336,8 +392,8 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-5127 assertions across 36 files with PyMuPDF installed, 5124 without it,
-measured 2026-10-06 by the first command above. That command re-measures
+5232 assertions across 38 files with PyMuPDF installed, 5229 without it,
+measured 2026-10-07 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The
 second run installs an import hook that

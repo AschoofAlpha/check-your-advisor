@@ -48,8 +48,8 @@ classifiers = [
 # The test suite proves the claim rather than restating
 # it: `python tests/run_all.py --block-third-party` installs an import hook that
 # makes requests, urllib3, pandas, numpy, matplotlib, fitz and openpyxl
-# unimportable, and 5124 of 5127 assertions still pass (36 files, measured
-# 2026-10-06). Adding a dependency here would make that suite a claim nobody
+# unimportable, and 5229 of 5232 assertions still pass (38 files, measured
+# 2026-10-07). Adding a dependency here would make that suite a claim nobody
 # checks. A plain run produces the second number where PyMuPDF is installed and
 # the first where it is not; every run re-measures whichever one it produced and
 # fails if this comment has drifted, and tests/test_declared_counts.py fails if

@@ -577,7 +577,7 @@ check("...and two of the five are counted as matches, three are sent to review",
 
 check("the provenance names the library and the day it was read",
       sorted(base["provenance"]),
-      ["duplicates_dropped", "encoding", "export_dates", "institutions", "path",
+      ["columns_filled", "duplicates_dropped", "encoding", "export_dates", "institutions", "path",
        "rejected", "rows_read", "source_dbs"])
 from_file = reconcile_roster(PEOPLE, loaded, PI_HAN)
 check("...and is filled in when a loaded roster was passed rather than a bare list",
@@ -604,6 +604,51 @@ check("the module exposes no ranking helper",
        and any(w in n.lower() for w in ("rank", "percentile", "quantile", "grade", "top_",
                                         "best_", "productivity"))],
       [])
+
+# ============================================================
+# A file exported straight from the library
+# ============================================================
+#
+# Two things stood between a CNKI or 万方 export and this loader. Several
+# exporters label every column twice, `Author-作者`, and that header matched no
+# alias whole. And neither 库来源 nor 导出日期 is a column any library writes —
+# they are facts about the export — so every native file was refused until the
+# user added two constant columns by hand. `profile --thesis-source` and
+# `--thesis-exported` supply them once.
+
+print("\n--- a native library export ---")
+
+NATIVE_HEADER = ["Title-题名", "Author-作者", "Supervisor-导师", "Degree-学位", "Year-学位年度"]
+NATIVE_ROWS = [["某某研究", "李明", PI_HAN, "博士", "2022"],
+               ["另一项研究", "王芳", PI_HAN, "硕士", "2023"]]
+native = roster_csv("native.csv", NATIVE_HEADER, NATIVE_ROWS)
+try:
+    theses.load_thesis_roster(native)
+    refusal = ""
+except ValueError as exc:
+    refusal = str(exc)
+check_true("a native export without 库来源 and 导出日期 is still refused",
+           "missing required column" in refusal)
+check_true("...with the two flags that supply them named in the refusal",
+           "--thesis-source" in refusal and "--thesis-exported" in refusal)
+
+loaded = theses.load_thesis_roster(native, defaults={"source_db": "CNKI", "export_date": "2026-10-07"})
+check("bilingual headers map through either half",
+      sorted(loaded["columns_used"]), ["advisor", "degree", "graduation_year", "student", "title"])
+check("the supplied library and date fill every row",
+      sorted({(row["source_db"], row["export_date"]) for row in loaded["rows"]}), [("CNKI", "2026-10-07")])
+check("...and say they came from the command line, not the file",
+      loaded["columns_filled"], {"source_db": "CNKI", "export_date": "2026-10-07"})
+check("...and the rows are read as usual", [row["student"] for row in loaded["rows"]], ["李明", "王芳"])
+
+with_column = roster_csv("with_column.csv", NATIVE_HEADER + ["库来源"],
+                         [row + ["万方"] for row in NATIVE_ROWS])
+loaded = theses.load_thesis_roster(with_column, defaults={"source_db": "CNKI", "export_date": "2026-10-07"})
+check("a column in the file wins over the flag", {row["source_db"] for row in loaded["rows"]}, {"万方"})
+check("...and only the missing one is recorded as filled", loaded["columns_filled"], {"export_date": "2026-10-07"})
+check("an empty flag fills nothing",
+      theses.load_thesis_roster(with_column, defaults={"source_db": "", "export_date": "2026-10-07"})["columns_filled"],
+      {"export_date": "2026-10-07"})
 
 TMP.cleanup()
 

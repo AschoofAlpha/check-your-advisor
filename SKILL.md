@@ -1,8 +1,8 @@
 ---
 name: check-your-advisor
-description: 查导师：把 PubMed 里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。只给证据，不替你下结论。Report what a principal investigator's publication record shows about being their student, from PubMed and optionally OpenAlex — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern, every count printed with its denominator. Also computes citation counts, an h-index, citation percentiles in OpenAlex topic-year cells, a slope with its interval, and a 0-100 composite score under an editable weight table; `compare` ranks corpora with star and letter bands. Journal impact factor, JCR quartile, CAS partition, the graduate roster and student evaluations are joined from CSV tables the user fills in by hand, and nothing is scraped. Nine verbs — `harvest`, `cite`, `journal-worklist`, `journal-risk`, `profile`, `compare`, `diff`, `download`, `clean-cache`. It never says whether an advisor is good.
+description: 查导师：把 PubMed 或 OpenAlex（全学科）里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。只给证据，不替你下结论。Report what a principal investigator's publication record shows about being their student, from PubMed or OpenAlex (every field) — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern, every count printed with its denominator. Also computes citation counts, an h-index, citation percentiles in OpenAlex topic-year cells, a slope with its interval, and a 0-100 composite score under an editable weight table; `compare` ranks corpora with star and letter bands. Journal impact factor, JCR quartile, CAS partition, the graduate roster and student evaluations are joined from CSV tables the user fills in by hand, and nothing is scraped. Nine verbs — `harvest`, `cite`, `journal-worklist`, `journal-risk`, `profile`, `compare`, `diff`, `download`, `clean-cache`. It never says whether an advisor is good.
 when_to_use: Use when someone is choosing or vetting a PhD or master's advisor or lab, asks what a PI's record shows, or wants advisors compared, ranked or scored. Typical requests include check my advisor, evaluate a PI, what is this lab like, should I join this lab, first-author slots, compare two advisors, 查导师, 选导师, 对比两个导师, 导师打分, 这个老板怎么样, 实验室发表记录, 期刊分区, 影响因子, 中科院分区, 毕业名单, 学位论文.
-allowed-tools: Bash(python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" *)
+allowed-tools: Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" *) Bash(python "${CLAUDE_SKILL_DIR}/scripts/run.py" *)
 model: inherit
 ---
 
@@ -10,9 +10,10 @@ model: inherit
 
 You are choosing a PhD or master's advisor. You have a name, a lab page written
 by the lab, and no way to check any of it. This reads what PubMed records about
-that person and reports it back as facts with denominators.
+that person — or OpenAlex, which covers every field, when the advisor works
+outside biomedicine — and reports it back as facts with denominators.
 
-It answers six questions from PubMed alone:
+It answers six questions from the publication record alone:
 
 - who has appeared in this group
 - who the first-author slots went to
@@ -25,6 +26,11 @@ And two more once you supply a table it cannot fetch: what those journals are
 rated in the edition you looked them up in, and how many people finished a
 degree here without a single indexed paper — the one group every question above
 is blind to.
+
+Every report opens with a one-page summary, **At a glance**: a dozen lines, each
+a count with its denominator and the section it came from, warnings first. It
+gives no verdict and holds no number its section does not print; the twenty
+sections below it say what each number is and what it cannot mean.
 
 ## What it will and will not tell you
 
@@ -94,6 +100,12 @@ those sections say "no table was supplied" and name the command that starts the
 job, rather than leaving a blank column you have to interpret. See **Three
 tables you fill in by hand** below.
 
+One journal-level number needs no table: `journal-risk` reads OpenAlex's own
+2-year mean citedness and h-index for every journal, and Section 18 prints them
+in a table of their own. They are OpenAlex's computations over what it indexes —
+an open counterpart of an impact factor, not the JCR one — and they never fill
+the impact-factor or partition columns.
+
 **Never visible, from any file.** What the group is like to be in day to day.
 Whether the PI is decent to work for. And the people who enrolled and left
 before finishing — who are in no library at all, not CNKI, not Wanfang, not
@@ -127,19 +139,34 @@ printed.
 
 Nothing needs installing. Everything below imports only the standard library.
 
+`${CLAUDE_SKILL_DIR}` is the directory this file sits in, wherever the skill was
+installed — `~/.claude/skills/check-your-advisor/` from a clone, the plugin cache
+from `/plugin install` — and `scripts/run.py` sits beside it. The commands call
+`python3`, which stock macOS and Ubuntu have and `python` they do not; where only
+`python` exists, as on some Windows installs, run the same command with `python`.
+Both spellings are pre-approved.
+
+**Pick the source by the advisor's field before anything else.** PubMed, the
+default, indexes medicine and the life sciences. An advisor in engineering,
+computer science, physics, chemistry, mathematics or the social sciences has
+little or nothing there, and a PubMed search by a common Chinese name then
+returns only namesakes. For those, harvest from OpenAlex with `--source
+openalex` (next section). When the field is unclear, ask, or run the PubMed
+harvest first: an empty one says so and names the flag.
+
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" harvest \
     --author "Wang Wei" --affiliation "Peking Union Medical College" \
     --years-back 10 --output-dir ./record --no-download
 ```
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" cite --output-dir ./record
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" journal-risk --output-dir ./record
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" cite --output-dir ./record
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" journal-risk --output-dir ./record
 ```
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" profile \
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" profile \
     --pi-name "Wang Wei" --output-dir ./record \
     --journal-table ./record/journals.csv \
     --thesis-roster ./record/theses.csv \
@@ -164,23 +191,41 @@ way. `--pdf-converter` picks one, `--pdf-converter-path` names a binary that is
 installed but not on PATH — which on Windows is the normal state of both Chrome
 and LibreOffice.
 
-### A second source: OpenAlex
+### OpenAlex: as the only source, or as a second one
 
 ```bash
-# Ask who publishes under this name. Prints every candidate; picks none unless
-# there is exactly one.
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
-    --author "Wang Wei" --affiliation "Peking Union Medical College" \
+# Ask who publishes under this name. Prints every candidate with its ORCID,
+# institutions, works count and top topics; picks none unless there is exactly one.
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" harvest \
+    --author "Wang Wei" --affiliation "Tsinghua University" \
     --resolve-openalex --output-dir ./record --no-download
 ```
 
 ```bash
-# Once you know which candidate is the right one: harvest PubMed and OpenAlex
-# together and merge them.
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" harvest \
-    --author "Wang Wei" --openalex-author-id A5023888391 --openalex-works \
+# Outside biomedicine: build the corpus from OpenAlex alone. PubMed is not asked.
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" harvest \
+    --author "Wang Wei" --affiliation "Tsinghua University" --source openalex \
+    --years-back 10 --output-dir ./record --no-download
+```
+
+`--source openalex` needs one OpenAlex author. It resolves the name the same way
+`--resolve-openalex` does: a single candidate is adopted; several are listed and
+the run stops with exit 1, writing no corpus, until you re-run with
+`--openalex-author-id` for the one whose institutions and topics fit. Section 1
+then says PubMed was not searched and that "PubMed record" on the page means
+"OpenAlex work". OpenAlex's records carry no emails, so the corpus rests on that
+author id — OpenAlex's clustering, recorded as OpenAlex's assertion — and
+Section 19 is the check on it.
+
+```bash
+# Biomedicine, both sources: harvest PubMed and OpenAlex together and merge them.
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" harvest \
+    --author "Wang Wei" --openalex-author-id A5023888391 --source both \
     --output-dir ./record --no-download
 ```
+
+`--source both` is `--resolve-openalex --openalex-works` under one name; the
+older pair still works.
 
 The merge deduplicates on DOI, then PMID, then normalised title plus year — the
 first two are exact and the third is the only one that can be wrong, which is
@@ -275,7 +320,7 @@ aggregate does not.
 
 A refused report is still written as a page — it names the gate, the observed
 values and the fix — and the process **exits 1**, so a script can branch on the
-exit code alone. Beware of reading that status through a pipe: `python run.py
+exit code alone. Beware of reading that status through a pipe: `python3 run.py
 profile | tail` reports tail's status, not the interpreter's.
 
 Drop `--no-download` on `harvest` to also race eight open-access sources for the
@@ -299,15 +344,15 @@ records older than `--max-age-days` so those sources get retried — successful
 downloads are never touched. Neither reads or writes a report.
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" download --output-dir ./record
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" clean-cache --output-dir ./record \
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" download --output-dir ./record
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" clean-cache --output-dir ./record \
     --max-age-days 30
 ```
 
 ### Several corpora on one page, ranked
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" compare ./record-a ./record-b \
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" compare ./record-a ./record-b \
     --output-dir ./comparison
 ```
 
@@ -358,7 +403,7 @@ live in each corpus's own `profile` report.
 ### The same advisor six months later — `diff`
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" diff ./record-2026-03 ./record-2026-09
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" diff ./record-2026-03 ./record-2026-09
 ```
 
 Older directory first. It reports what is in one corpus and not the other, who
@@ -404,7 +449,7 @@ flag wins where both exist.
 ### Journal metrics — `journal-worklist`, then `profile --journal-table`
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" journal-worklist --output-dir ./record
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" journal-worklist --output-dir ./record
 ```
 
 This makes no network request. It scans the corpus and writes
@@ -465,7 +510,7 @@ Three things about a journal *are* free to look up, from keyless public APIs, an
 this verb collects them:
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/scripts/run.py" journal-risk --output-dir ./record
+python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" journal-risk --output-dir ./record
 ```
 
 It reads DOAJ indexing status, Crossref metadata deposit coverage and OpenAlex's
@@ -531,6 +576,13 @@ nothing in the standard library converts 张三 into "Zhang San", and this tool
 will not guess. Without that column every graduate lands in "needs manual
 review", the count of graduates with no PubMed paper is suppressed entirely, and
 you get a section that cost you an export and answers nothing.
+
+**A file exported straight from CNKI or 万方 has no `库来源` or `导出日期`
+column** — they describe the export, not a thesis. Give them once for the whole
+file with `--thesis-source CNKI --thesis-exported 2026-10-07` instead of adding
+two columns by hand; a column in the file wins over the flag, and Section 17 says
+which values came from the command line. Bilingual headers such as `Author-作者`
+or `导师|Supervisor` are read through either half.
 
 This is the only part of the report that sees a denominator PubMed structurally
 cannot: everyone who finished a degree here, including the people who published
@@ -627,18 +679,40 @@ strength:
 | Flag | Strength |
 |---|---|
 | `--orcid 0000-0002-...` | Strongest. One is worth all the rest, and it also enters the search as `[auid]` |
-| `--email-domain your-university.edu.cn` | The corresponding author's address. Repeatable |
+| `--author-email wangwei@pku.edu.cn` | The advisor's own address, usually on the lab page, matched whole. Short of an ORCID the strongest there is: a namesake at the same university does not share it. Repeatable |
+| `--email-domain your-university.edu.cn` | The corresponding author's domain, matched at a label boundary. Repeatable |
 | `--affiliation-keyword "..."` | Weakest — it fails on same-name colleagues inside one university system. Repeatable, and defaults to whatever `--affiliation` says |
 
 `--require-affiliation` turns a non-matching institution from "kept and marked
 unverified" into "rejected".
+
+### No ORCID: let the bylines tell the namesakes apart
+
+Most Chinese advisors have no ORCID on record, and the common names are the ones
+shared most. When neither an ORCID nor the advisor's own address was given,
+`harvest` logs the email addresses and the departments the bylines print beside
+the target name — most frequent first, counted over everything PubMed returned,
+before the identity filter — and Section 1 repeats them. Two people sharing a
+name separate there: different addresses, different departments. The playbook:
+
+1. Harvest once with the name and the institution.
+2. Read the address list. Pick the advisor's address — the lab page usually
+   prints it — or the department that is theirs.
+3. Re-run with `--author-email <that address>` (or `--affiliation-keyword
+   "<that department>"`), and add `--require-affiliation` so records that match
+   none of it are rejected instead of kept as bare name matches.
+
+Never pick an address for the user on frequency alone: the most frequent
+address belongs to whoever publishes most under the name, which is the proxy
+the OpenAlex rule below refuses for the same reason. Show them the list.
 
 ### Letting OpenAlex propose the identity
 
 `--resolve-openalex` asks the free, keyless OpenAlex authors API who publishes
 under this name, optionally narrowed by `--affiliation`, and prints each
 candidate with its author id, its ORCID if OpenAlex holds one, its institution
-history and its works count.
+history, its works count and its top research topics — two namesakes at one
+university are usually told apart fastest by what they work on.
 
 **One candidate is adopted. Two or more are listed and none is adopted.** Pick
 the one you recognise and re-run with `--openalex-author-id A5023888391`.
@@ -804,7 +878,10 @@ options.
    warning with it: the corpus may describe more than one researcher, and no
    count below is certified to be about the person named.
 2. Lead with the roster and the first-author distribution; those are what the
-   question "what is it like to be their student" actually turns on.
+   question "what is it like to be their student" actually turns on. The page's
+   **At a glance** block is the short form of the whole report: relay its lines
+   as written, each with the section it names, and send the reader to that
+   section for the definition. Do not compress it further into a verdict.
 3. Quote every count with its denominator, exactly as the report prints it.
    "3 of 11" and "27%" are not interchangeable when n is 11.
 4. Say which identity evidence was configured. A report built on affiliation
@@ -852,7 +929,9 @@ options.
     `journal-worklist`. "The tool cannot show it" and "nobody has filled the
     table in yet" are different answers, and only the second is true here. When
     quoting a joined number, carry its edition and retrieval date with it — a
-    partition with neither is unverifiable a year later.
+    partition with neither is unverifiable a year later. OpenAlex's 2-year mean
+    citedness in Section 18 is not an impact factor: quote it as OpenAlex's
+    figure, with the date `journal-risk` read it, and never as "IF".
 11. When quoting the graduate section, quote the floor and the ceiling and say
     that everyone who left before finishing is in neither. Never restate it as a
     graduation rate or an attrition rate.
@@ -883,8 +962,8 @@ Both degrade with a tested fallback; neither is required.
 ## Tests
 
 ```bash
-python "${CLAUDE_PLUGIN_ROOT}/tests/run_all.py"
-python "${CLAUDE_PLUGIN_ROOT}/tests/run_all.py" --block-third-party
+python3 "${CLAUDE_SKILL_DIR}/tests/run_all.py"
+python3 "${CLAUDE_SKILL_DIR}/tests/run_all.py" --block-third-party
 ```
 
 The second run installs an import hook that blocks `requests`, `urllib3`,

@@ -11,6 +11,7 @@ import logging
 import re
 import time
 import xml.etree.ElementTree as ET
+from collections import Counter
 from collections.abc import Mapping
 from datetime import datetime, timedelta
 from urllib.error import HTTPError, URLError
@@ -665,14 +666,103 @@ def _affiliation_matches(affil_text: str, affil_keywords: list[str]) -> tuple[bo
 
 
 def _email_domain_matches(email: str, allowed_domains: list[str]) -> bool:
-    """检查邮箱后缀是否匹配"""
+    """Whether the byline's email is one of the addresses, or under one of the domains, given.
+
+    An entry with an `@` inside it is a whole address — the one on the lab page,
+    which is nearly unique to one person — and must match exactly. Anything else
+    is a domain, matched at a label boundary: `pku.edu.cn` admits `a@pku.edu.cn`
+    and `a@stu.pku.edu.cn` but not `a@xpku.edu.cn`, which a bare suffix test let
+    through. A leading `@` on a domain is tolerated.
+    """
     if not email or not allowed_domains:
         return False
-    email_lower = email.lower()
-    for domain in allowed_domains:
-        if email_lower.endswith(domain.lower()):
+    email_lower = email.strip().lower()
+    for entry in allowed_domains:
+        wanted = str(entry or "").strip().lower()
+        if not wanted:
+            continue
+        if "@" in wanted.lstrip("@"):
+            if email_lower == wanted:
+                return True
+            continue
+        domain = wanted.lstrip("@")
+        if email_lower.endswith("@" + domain) or email_lower.endswith("." + domain):
             return True
     return False
+
+
+# Words that mark the segment of an affiliation string naming an institution,
+# as opposed to a department, a street or a country. The first set names a whole
+# institution; the second a unit inside one, used only when the first finds none.
+_INSTITUTION_WORDS = re.compile(
+    r"universit|institut|hospital|academy|大学|研究所|研究院|科学院|医院", re.IGNORECASE)
+_UNIT_WORDS = re.compile(
+    r"college|school|center|centre|laborator|学院|中心|实验室", re.IGNORECASE)
+_EMAIL_IN_TEXT = re.compile(r"[\w.+-]+@[\w.-]+\.\w+")
+
+
+def affiliation_label(text: str) -> str:
+    """The department-and-institution part of one byline's affiliation string.
+
+    `Department of Cardiology, Peking University First Hospital, Beijing 100034,
+    China. Electronic address: x@y.cn` becomes `Department of Cardiology, Peking
+    University First Hospital`: the segments up to and including the first one
+    that names an institution (a unit such as a school, when no segment names a
+    whole institution), at most two of them, with the email and any second
+    affiliation dropped. A string with no institution word keeps its first
+    segment. Good enough to tell two same-name people apart, which is all it is
+    used for; it is never matched against.
+    """
+    first = _EMAIL_IN_TEXT.sub("", str(text or "")).split(";")[0]
+    segments = [part.strip(" .") for part in first.split(",") if part.strip(" .")]
+    if not segments:
+        return ""
+    for words in (_INSTITUTION_WORDS, _UNIT_WORDS):
+        for index, segment in enumerate(segments):
+            if words.search(segment):
+                return ", ".join(segments[max(0, index - 1):index + 1])
+    return segments[0]
+
+
+def identity_hints(papers: list[dict], target_name: str, limit: int = 5) -> dict:
+    """What the harvested bylines print beside this name, for telling namesakes apart.
+
+    Counted over every fetched record in which the name holds a first, last or
+    corresponding slot — the same slots the identity filter reads — before any
+    filtering, because the point is to show the people the filter is choosing
+    between. Two lists, each most frequent first: the email addresses printed in
+    those bylines' affiliations, and their department-and-institution labels
+    (`affiliation_label`). Re-harvesting with the advisor's own address as
+    `--author-email` is the strongest evidence short of an ORCID; a department
+    label is the next best `--affiliation-keyword`.
+    """
+    target_parts = str(target_name or "").lower().split()
+    emails: Counter[str] = Counter()
+    labels: Counter[str] = Counter()
+    examined = 0
+    for paper in papers or []:
+        authors = paper.get("authors") or []
+        hit = False
+        for index, author in enumerate(authors):
+            if not _name_matches(author, target_parts):
+                continue
+            if not (index == 0 or index == len(authors) - 1 or author.get("is_corresponding")):
+                continue
+            hit = True
+            if author.get("email"):
+                emails[str(author["email"]).strip().lower()] += 1
+            label = affiliation_label(author.get("affiliation", ""))
+            if label:
+                labels[label] += 1
+        examined += hit
+    return {
+        "name": " ".join(str(target_name or "").split()),
+        "records_examined": examined,
+        "emails": [[value, count] for value, count in emails.most_common(limit)],
+        "affiliations": [[value, count] for value, count in labels.most_common(limit)],
+        "distinct_emails": len(emails),
+        "distinct_affiliations": len(labels),
+    }
 
 
 # ============================================================

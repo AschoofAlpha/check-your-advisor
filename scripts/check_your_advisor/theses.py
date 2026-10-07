@@ -517,6 +517,29 @@ _ALIAS_TO_KEY: dict[str, str] = {
     for alias in column.aliases
 }
 
+# CNKI and several other exporters label each column twice, an English field
+# name and its Chinese label joined by a dash — `Title-题名`, `Author-作者`. Either
+# half names the column, so a header that matches no alias whole is tried half
+# by half.
+_HEADER_HALVES_RE = re.compile(r"[-－—–|/]")
+
+#: The two required columns a library export never carries, because they are
+#: facts about the export rather than about a thesis. `profile --thesis-source`
+#: and `--thesis-exported` supply them once for the whole file when the file has
+#: no such column; a column in the file always wins.
+FILLABLE_KEYS: tuple[str, ...] = ("source_db", "export_date")
+
+
+def _header_key(header: str) -> str | None:
+    key = _ALIAS_TO_KEY.get(_normalise_header(header))
+    if key is not None:
+        return key
+    for half in _HEADER_HALVES_RE.split(str(header or "")):
+        key = _ALIAS_TO_KEY.get(_normalise_header(half))
+        if key is not None:
+            return key
+    return None
+
 
 def _year(value: Any) -> int | None:
     match = re.search(r"(\d{4})", str(value or ""))
@@ -569,7 +592,7 @@ def _read_rows(path: Path) -> tuple[list[dict[str, str]], list[str], str]:
     ) from last_error
 
 
-def load_thesis_roster(path: str | Path) -> dict[str, Any]:
+def load_thesis_roster(path: str | Path, defaults: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """
     Read a hand-exported thesis roster and validate it against `COLUMNS`.
 
@@ -600,6 +623,12 @@ def load_thesis_roster(path: str | Path) -> dict[str, Any]:
       advisor are *not* duplicates — that is one person with two theses, and
       `reconcile_roster` counts them as one graduate.
 
+    `defaults` fills `FILLABLE_KEYS` — `source_db` and `export_date` — for every
+    row when the file has no such column, which is the normal case for a file
+    exported straight from CNKI or 万方. What was filled, and with what, is
+    returned under `columns_filled` so the report can say it came from the command
+    line rather than from the file.
+
     Returns a dict with `rows`, `rejected`, `duplicates_dropped`, the
     `denominator` those rows were counted over, `columns_used` mapping each
     schema key to the header as actually written, `columns_missing_optional`,
@@ -618,7 +647,7 @@ def load_thesis_roster(path: str | Path) -> dict[str, Any]:
     columns_used: dict[str, str] = {}
     unmapped: list[str] = []
     for header in fieldnames:
-        key = _ALIAS_TO_KEY.get(_normalise_header(header))
+        key = _header_key(header)
         if key is None:
             unmapped.append(header)
         elif key not in columns_used:
@@ -627,15 +656,23 @@ def load_thesis_roster(path: str | Path) -> dict[str, Any]:
         else:
             unmapped.append(header)
 
-    missing_required = [key for key in REQUIRED_KEYS if key not in columns_used]
+    filled = {
+        key: str(value).strip() for key, value in (defaults or {}).items()
+        if key in FILLABLE_KEYS and key not in columns_used and str(value or "").strip()
+    }
+    missing_required = [key for key in REQUIRED_KEYS if key not in columns_used and key not in filled]
     if missing_required:
         wanted = {
             column.key: column.aliases[0] for column in COLUMNS if column.key in missing_required
         }
+        fillable = [key for key in missing_required if key in FILLABLE_KEYS]
         raise ValueError(
             f"{path} is missing required column(s): "
             + ", ".join(f"{key} (e.g. {header!r})" for key, header in wanted.items())
             + f". Headers found: {', '.join(fieldnames) or '(none)'}."
+            + (" A file exported straight from CNKI or 万方 has neither of the last two: pass "
+               "`profile --thesis-source CNKI` (or 万方) and `--thesis-exported YYYY-MM-DD` instead."
+               if fillable else "")
         )
 
     year_ceiling = date.today().year + 1
@@ -648,6 +685,7 @@ def load_thesis_roster(path: str | Path) -> dict[str, Any]:
         # +2: one for the header line, one because humans count from 1.
         line = offset + 2
         values = {key: str(raw.get(header) or "").strip() for header, key in header_map.items()}
+        values.update(filled)
         student = values.get("student", "")
         if not student:
             rejected.append({"line": line, "reason": "no student name", "raw": dict(raw)})
@@ -724,6 +762,7 @@ def load_thesis_roster(path: str | Path) -> dict[str, Any]:
         "denominator": len(rows),
         "rows_read": len(raw_rows),
         "columns_used": columns_used,
+        "columns_filled": filled,
         "columns_missing_optional": [key for key in OPTIONAL_KEYS if key not in columns_used],
         "unmapped_columns": unmapped,
         "flag_counts": dict(sorted(Counter(f for row in rows for f in row["flags"]).items())),
@@ -1142,6 +1181,8 @@ def reconcile_roster(
             "encoding": provenance.get("encoding"),
             "source_dbs": provenance.get("source_dbs") or {},
             "export_dates": provenance.get("export_dates") or [],
+            # Supplied on the command line for the whole file, not read from it.
+            "columns_filled": dict(provenance.get("columns_filled") or {}),
             "institutions": provenance.get("institutions") or {},
             "rows_read": provenance.get("rows_read"),
             "rejected": len(provenance.get("rejected") or []),

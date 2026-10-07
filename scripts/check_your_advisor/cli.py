@@ -110,6 +110,11 @@ def parse_fetch_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--config", help=zh("JSON 配置文件路径（默认自动读取 config.json）"))
     parser.add_argument("--author", dest="author_name", help=zh("目标作者名"))
     parser.add_argument("--affiliation", help=zh("目标机构名"))
+    parser.add_argument(
+        "--source", choices=HARVEST_SOURCES, default=None,
+        help=zh("从哪里取论文：pubmed（默认，生物医学）、openalex（全学科——工科、计算机、"
+                "物理、化学、社科的导师用这个）或 both（两边都取再去重合并）。openalex 和 both "
+                "会先按姓名+机构在 OpenAlex 里找作者，候选不止一位时列出来让你认"))
     parser.add_argument("--years-back", type=int, help=zh("向前检索年数"))
     parser.add_argument("--email", help=zh("Unpaywall 邮箱"))
     parser.add_argument("--api-key", help="PubMed API key")
@@ -127,6 +132,10 @@ def parse_fetch_args(argv: list[str] | None = None) -> argparse.Namespace:
            "进程退出码是 1。以前这些只能写在 config 文件里。"),
     )
     identity.add_argument("--orcid", help=zh("本人 ORCID（最强证据，一条顶其余全部）"))
+    identity.add_argument("--author-email", action="append", dest="author_emails",
+                          metavar="ADDRESS",
+                          help=zh("导师本人的邮箱（课题组主页上那个），可重复给。整个地址精确匹配，"
+                                  "没有 ORCID 时这是最强的证据——常见姓名下同一所学校里也几乎不会撞上"))
     identity.add_argument("--email-domain", action="append", dest="email_domains",
                           metavar="DOMAIN", help=zh("通讯邮箱域名，可重复给（如 pumc.edu.cn）"))
     identity.add_argument("--affiliation-keyword", action="append", dest="affiliation_keywords",
@@ -234,6 +243,12 @@ def parse_profile_args(argv: list[str] | None = None) -> argparse.Namespace:
                           help=zh("学位论文名单 CSV（导师姓名/学生姓名/学位类型/毕业年/库来源/导出日期）。"
                                   "这是唯一能数出「毕业了但一篇 PubMed 都没有」的那批人的来源。"
                                   "建议加一列 学生姓名拼音，否则中文名单与英文署名根本对不上"))
+    external.add_argument("--thesis-source", metavar="LIBRARY",
+                          help=zh("名单文件里没有「库来源」列时，给整份文件填上它来自哪个库（CNKI、万方 或 其他）。"
+                                  "从知网/万方直接导出的文件都没有这一列"))
+    external.add_argument("--thesis-exported", metavar="YYYY-MM-DD",
+                          help=zh("名单文件里没有「导出日期」列时，给整份文件填上导出的那一天。"
+                                  "文件里有这一列时以文件为准"))
     external.add_argument("--evaluation-table", metavar="CSV",
                           help=zh("学生评价 CSV（导师姓名/评价来源/数据获取日期/评价内容或维度评分，"
                                   "可选 学生身份、评价年份、原文链接）。第 20 节按原样列出每一条并注明出处，"
@@ -494,6 +509,33 @@ def _has_identity_evidence(identity: dict, merge_works: bool = False) -> bool:
     )
 
 
+def _has_unique_evidence(identity: dict) -> bool:
+    """Whether an ORCID or a whole email address was given: evidence a namesake cannot share.
+
+    A domain or an affiliation keyword is shared by everyone at the institution,
+    so under a common name it still admits several people.
+    """
+    return bool((identity.get("orcid") or "").strip()) or any(
+        "@" in str(entry).strip().lstrip("@") for entry in identity.get("email_domains") or []
+    )
+
+
+def _log_identity_hints(hints: dict, logger: logging.Logger) -> None:
+    """Print the emails and departments the bylines show beside the name, most frequent first."""
+    if not hints.get("records_examined") or not (hints.get("emails") or hints.get("affiliations")):
+        return
+    logger.warning(
+        "这 %d 条记录里，「%s」坐在第一/末位/通讯位时，旁边印着下面这些邮箱和单位——同名的不同的人"
+        "会在这里分开。认出导师的那一个，加 --author-email <邮箱> 或 --affiliation-keyword \"<单位>\" 重跑，"
+        "再加 --require-affiliation 把对不上的同名记录挡在语料外：",
+        hints["records_examined"], hints.get("name", ""),
+    )
+    for email, count in hints.get("emails") or []:
+        logger.warning("  邮箱 %s（%d 条）", email, count)
+    for label, count in hints.get("affiliations") or []:
+        logger.warning("  单位 %s（%d 条）", label, count)
+
+
 def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     output_overridden = args.output_dir is not None
     for key in ["author_name", "affiliation", "email", "output_dir", "pdf_dir", "cache_db", "max_workers", "log_level"]:
@@ -511,6 +553,9 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
     if args.no_download:
         cfg["download_pdfs"] = False
 
+    if getattr(args, "source", None) is not None:
+        cfg["source"] = args.source
+
     identity = cfg.setdefault("author_identity", {})
     for flag, key in (("orcid", "orcid"),
                       ("email_domains", "email_domains"),
@@ -520,6 +565,15 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
         value = getattr(args, flag, None)
         if value is not None:
             identity[key] = value
+
+    # A whole address is matched exactly by `_email_domain_matches`, so it can
+    # share the list the domains live in: one evidence tier, one marker, one line
+    # in Section 1, and the address printed there says which kind it was.
+    for address in getattr(args, "author_emails", None) or []:
+        address = str(address).strip()
+        domains = identity.setdefault("email_domains", [])
+        if address and address.lower() not in {str(d).lower() for d in domains}:
+            domains.append(address)
 
     # The OpenAlex switches live in their own config block rather than inside
     # `author_identity`, because they say what to *fetch* while that block says
@@ -532,6 +586,13 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
         value = getattr(args, flag, None)
         if value is not None:
             openalex[key] = value
+    # `--source openalex` / `both` is the two OpenAlex switches above under one
+    # name: find the author (an explicit id skips the lookup) and take their
+    # works. Set outright rather than defaulted, because DEFAULT_CONFIG already
+    # carries both as False and a default would never apply.
+    if cfg.get("source") in ("openalex", "both"):
+        openalex["resolve_author"] = True
+        openalex["merge_works"] = True
 
     # `--affiliation` used to reach only the search query, so a run that named
     # the institution on the command line still verified nobody against it and
@@ -550,6 +611,11 @@ def apply_cli_overrides(cfg: dict, args: argparse.Namespace) -> dict:
 # dispatch, and the first real `run.py compare` died on NameError. Adding a verb
 # means adding it in three places — here, in main(), and as a cmd_* function —
 # and then running it.
+# Where `harvest` takes papers from. PubMed indexes biomedicine and the life
+# sciences; OpenAlex indexes every field, which is the only way an engineering,
+# computer-science, physics, chemistry or social-science advisor has a corpus.
+HARVEST_SOURCES = ("pubmed", "openalex", "both")
+
 SUBCOMMANDS = {"harvest", "fetch", "profile", "cite", "compare", "diff", "journal-worklist",
                "journal-risk", "download", "clean-cache"}
 
@@ -1394,10 +1460,15 @@ def _profile_corpus(papers: list[dict], cfg: dict, search: dict | None = None) -
         # flattened, because the whole point of the OpenAlex block is that it
         # says who asserted what and when — a resolution reduced to an id has
         # lost the part that makes it checkable.
-        for key in ("openalex", "openalex_works"):
+        for key in ("openalex", "openalex_works", "identity_hints"):
             block = search.get(key)
             if isinstance(block, dict) and block:
                 query[key] = block
+        # `pubmed_searched` is written only by `--source openalex`, as False; a
+        # corpus from before the flag existed was always a PubMed search.
+        query["pubmed_searched"] = search.get("pubmed_searched", True) is not False
+        if isinstance(search.get("sources"), list):
+            query["sources"] = [str(item) for item in search["sources"]]
     else:
         # Coverage is unknowable from a legacy file: it records neither the
         # esearch hit count nor how many PMIDs came back, so Section 1 prints
@@ -1713,7 +1784,7 @@ def _load_journal_risk(
 
 
 def _load_thesis_roster(
-    path: str | None, cfg: dict, logger: logging.Logger
+    path: str | None, cfg: dict, logger: logging.Logger, defaults: dict | None = None
 ) -> tuple[dict | None, str]:
     """The degree-thesis roster, or None and the reason why.
 
@@ -1737,7 +1808,7 @@ def _load_thesis_roster(
     from check_your_advisor.theses import load_thesis_roster
 
     try:
-        roster = load_thesis_roster(resolved)
+        roster = load_thesis_roster(resolved, defaults=defaults)
     except (OSError, ValueError) as exc:
         logger.error("学位论文名单无法读取，第 17 节将写明原因: %s (%s)", resolved, exc)
         return None, lazy_en("{resolved} could not be read as a thesis roster: {exc}", resolved=resolved, exc=i18n.reason(exc))
@@ -2016,7 +2087,10 @@ def cmd_profile(argv: list[str]):
     )
     chinese_records, _chinese_note = _load_chinese_records(args.chinese_records, cfg, logger)
     impact_reference, impact_reference_note = _load_impact_reference(output_dir, logger)
-    thesis_roster, thesis_note = _load_thesis_roster(args.thesis_roster, cfg, logger)
+    thesis_roster, thesis_note = _load_thesis_roster(
+        args.thesis_roster, cfg, logger,
+        defaults={"source_db": args.thesis_source, "export_date": args.thesis_exported},
+    )
     evaluation_table, evaluation_note = _load_evaluation_table(
         args.evaluation_table, cfg, logger)
 
@@ -2471,6 +2545,7 @@ def cmd_fetch(argv: list[str]):
         AUTHOR_IDENTITY,
         MAX_RECORDS,
         fetch_details,
+        identity_hints,
         is_first_or_corresponding,
         search_pubmed,
     )
@@ -2505,12 +2580,13 @@ def cmd_fetch(argv: list[str]):
     if not _has_identity_evidence(identity_cfg or {},
                                   merge_works=bool((cfg.get("openalex") or {}).get("merge_works"))):
         logger.warning(
-            "没有配置任何能落到记录上的身份证据（ORCID / 邮箱域名 / 机构关键词），"
+            "没有配置任何能落到记录上的身份证据（ORCID / 邮箱 / 邮箱域名 / 机构关键词），"
             "检索回来的将是「所有叫这个名字的人」。常见姓名下这会混进好几个不同的研究者，"
             "画像报告仍会照常生成，但第 0/1/19 节顶部会挂一行提示说明这一点，退出码为 1。"
         )
         logger.warning(
-            "补一条即可：--orcid 0000-0002-XXXX-XXXX，或 --email-domain your-university.edu.cn，"
+            "补一条即可：--orcid 0000-0002-XXXX-XXXX，或 --author-email 导师本人的邮箱，"
+            "或 --email-domain your-university.edu.cn，"
             "或 --affiliation-keyword \"Your University Full Name\"。"
         )
         if (identity_cfg or {}).get("openalex_author_id"):
@@ -2526,20 +2602,56 @@ def cmd_fetch(argv: list[str]):
     # print how much of the matched set was actually retrieved, rather than
     # rebuilding a guess from the config it happens to be run with later.
     search_provenance: dict = {}
-    pmids = search_pubmed(
-        cfg["author_name"], cfg["years_back"], cfg["api_key"],
-        retmax=cfg.get("retmax", 500), identity=identity_cfg,
-        provenance=search_provenance,
-        max_records=cfg.get("max_records", MAX_RECORDS),
-    )
-    if not pmids:
-        logger.warning("未找到任何论文，请检查作者名拼写。")
-        return
+    source = cfg.get("source") or "pubmed"
+    resolved_id = _openalex_id(identity_cfg.get("openalex_author_id"))
+    merge_requested = bool((cfg.get("openalex") or {}).get("merge_works"))
+    if source == "openalex":
+        # Nothing is asked of PubMed at all: for an advisor outside biomedicine a
+        # PubMed search by a common name returns only namesakes, and the identity
+        # filter would be choosing among people who are all the wrong one.
+        if not resolved_id:
+            logger.error(
+                "--source openalex 需要一位确定的 OpenAlex 作者，本次没有定下来（候选为多个、为零，"
+                "或查询失败，见上）。认出是哪一位后加 --openalex-author-id <ID> 重跑。"
+            )
+            return 1
+        logger.info("--source openalex：不查 PubMed，语料全部来自 OpenAlex 作者 %s 名下的作品。",
+                    resolved_id)
+        search_provenance.update({"pubmed_searched": False, "years_back": cfg["years_back"]})
+        pmids: list[str] = []
+    else:
+        pmids = search_pubmed(
+            cfg["author_name"], cfg["years_back"], cfg["api_key"],
+            retmax=cfg.get("retmax", 500), identity=identity_cfg,
+            provenance=search_provenance,
+            max_records=cfg.get("max_records", MAX_RECORDS),
+        )
+        if not pmids and not (merge_requested and resolved_id):
+            logger.warning("未找到任何论文，请检查作者名拼写。")
+            logger.warning(
+                "PubMed 只收生物医学和生命科学。导师在工科、计算机、物理、化学或社科的话，"
+                "改用 --source openalex 从 OpenAlex（覆盖全学科）取论文。"
+            )
+            return
+        if not pmids:
+            logger.warning("PubMed 里这个名字没有记录，语料只用 OpenAlex 名下的作品。")
 
     # Step 2: 获取详情
-    logger.info("正在获取 %d 篇论文的详细信息...", len(pmids))
-    all_papers = fetch_details(pmids, cfg["api_key"], cfg["delay_seconds"])
-    logger.info("成功解析 %d 篇", len(all_papers))
+    all_papers: list[dict] = []
+    if pmids:
+        logger.info("正在获取 %d 篇论文的详细信息...", len(pmids))
+        all_papers = fetch_details(pmids, cfg["api_key"], cfg["delay_seconds"])
+        logger.info("成功解析 %d 篇", len(all_papers))
+
+        # What the bylines print beside this name, before the filter chooses
+        # among them. Stored either way, so the report can show it under an
+        # identity warning; logged only when nothing near-unique (an ORCID or
+        # the advisor's own address) was given, because then it is the reader's
+        # best tool for re-running against the right person.
+        hints = identity_hints(all_papers, cfg["author_name"])
+        search_provenance["identity_hints"] = hints
+        if not _has_unique_evidence(identity_cfg):
+            _log_identity_hints(hints, logger)
 
     # Step 3: 过滤（带机构深度验证 + [Keep]/[Skip] 日志）
     logger.info("筛选第一/通讯作者 + 机构身份验证...")
@@ -2590,6 +2702,16 @@ def cmd_fetch(argv: list[str]):
     matched_papers, openalex_works = _openalex_corpus(
         cfg, identity_cfg, matched_papers, logger
     )
+    # Which sources this corpus was built from, so Section 1 does not print
+    # PubMed coverage lines over a corpus PubMed was never asked about.
+    search_provenance["sources"] = (
+        ([] if source == "openalex" else ["pubmed"])
+        + (["openalex"] if openalex_works.get("merged") else [])
+    )
+    if not matched_papers:
+        logger.error("这次没有取到任何可用的论文（PubMed 为零，OpenAlex 也没有本人在第一/末位/通讯位的作品），"
+                     "不写语料文件。")
+        return 1
 
     matched_papers.sort(key=lambda x: x.get("pub_year", "0"), reverse=True)
 

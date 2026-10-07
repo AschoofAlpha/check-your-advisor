@@ -266,6 +266,22 @@ check("a source OpenAlex does not hold produces one stated signal",
           FakeClient({"api.openalex.org": FakeResponse(200, {})}), HEP)],
       [journal_risk.SIGNAL_OPENALEX_UNKNOWN])
 
+# OpenAlex's own journal-level numbers: the one journal-level figure that needs
+# no hand-filled table, because OpenAlex publishes it openly.
+IMPACT = journal_risk.SIGNAL_OPENALEX_IMPACT
+OPENALEX_STATS = FakeResponse(200, {
+    "id": "https://openalex.org/S124", "works_count": 900,
+    "summary_stats": {"2yr_mean_citedness": 3.2149, "h_index": 140, "i10_index": 2000},
+})
+stats = {s["signal"]: s for s in journal_risk.fetch_openalex_source(
+    FakeClient({"api.openalex.org": OPENALEX_STATS}), HEP)}
+check("OpenAlex's journal summary is collected, the citedness to two places",
+      stats[IMPACT]["observed"], {"two_year_mean_citedness": 3.21, "h_index": 140, "i10_index": 2000})
+check_true("...and its sentence says it is not the JCR impact factor",
+           "not the JCR impact factor" in stats[IMPACT]["statement"])
+check("a source record with no summary stats yields no such signal", IMPACT in alex, False)
+check_true("...and the signal has a place in the declared order", IMPACT in journal_risk.SIGNAL_ORDER)
+
 print("\nthe user's email never lands in the file")
 
 client = FakeClient({"api.crossref.org": CROSSREF_HIT})
@@ -631,6 +647,24 @@ check("...and the tracked Crossref field list, so the denominator is checkable",
       list(journal_risk.TRACKED_COVERAGE_FIELDS))
 check("joining against nothing at all does not raise",
       journal_risk.join_risk(None, None)["journal_denominator"], 0)
+
+# Section 18 prints those numbers in a table of their own, with or without a
+# hand-filled journal table, and says how to collect them when nobody has.
+from check_your_advisor.profile import report as report_module  # noqa: E402
+
+with_stats = [dict(r) for r in reloaded["records"]]
+for record in with_stats:
+    if record.get("issn") == HEP:
+        record["signals"] = list(record.get("signals") or []) + [stats[IMPACT]]
+open_lines = report_module._open_metric_lines(joined_journals,
+                                              journal_risk.join_risk(joined_journals, {"records": with_stats}))
+check_true("Section 18 prints OpenAlex's numbers per journal, no table needed",
+           any(line.startswith("| Journal of Hepatology | 2 | 3.21 | 140 |") for line in open_lines))
+check_true("...a dash for a journal OpenAlex gave none for",
+           any(line.startswith("| Nanhai Reports | 1 | - | - |") for line in open_lines))
+check_true("...and how many journals it covered", any("for 1 of 3 journals" in line for line in open_lines))
+check_true("with nothing collected it names the command that collects them",
+           any("journal-risk --output-dir" in line for line in report_module._open_metric_lines(joined_journals, absent)))
 
 
 # ============================================================

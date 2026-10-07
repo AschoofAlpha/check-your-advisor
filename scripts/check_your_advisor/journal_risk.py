@@ -144,6 +144,7 @@ SIGNAL_OPENALEX_DOAJ = "openalex_in_doaj"
 SIGNAL_OPENALEX_SCOPUS = "openalex_indexed_in_scopus"
 SIGNAL_OPENALEX_APC = "openalex_apc_usd"
 SIGNAL_OPENALEX_WORKS = "openalex_works_count"
+SIGNAL_OPENALEX_IMPACT = "openalex_impact"
 
 SIGNAL_ORDER: tuple[str, ...] = (
     SIGNAL_DOAJ_INDEXED,
@@ -159,6 +160,7 @@ SIGNAL_ORDER: tuple[str, ...] = (
     SIGNAL_OPENALEX_SCOPUS,
     SIGNAL_OPENALEX_APC,
     SIGNAL_OPENALEX_WORKS,
+    SIGNAL_OPENALEX_IMPACT,
 )
 
 # The Crossref `coverage` keys counted for `crossref_metadata_missing`. Declared
@@ -298,6 +300,16 @@ def _statement(name: str, observed: Mapping[str, Any]) -> Text | None:
     if name == SIGNAL_OPENALEX_APC:
         return lazy_en("OpenAlex records an article processing charge of about {apc_usd} USD.",
                        apc_usd=o.get("apc_usd", "?"))
+    if name == SIGNAL_OPENALEX_IMPACT:
+        return lazy_en(
+            "OpenAlex's journal summary: 2-year mean citedness {citedness}, h-index {h_index}, "
+            "i10-index {i10_index}. The citedness is OpenAlex's open counterpart of an impact "
+            "factor — the mean citations received in one year by what the journal published in the "
+            "two years before, counted over the works OpenAlex indexes — and it is not the JCR "
+            "impact factor, which counts differently and can differ from it.",
+            citedness=o.get("two_year_mean_citedness") if o.get("two_year_mean_citedness") is not None else "?",
+            h_index=o.get("h_index") if o.get("h_index") is not None else "?",
+            i10_index=o.get("i10_index") if o.get("i10_index") is not None else "?")
     if name == SIGNAL_OPENALEX_WORKS:
         publisher = o.get("publisher") or lazy_en("a publisher OpenAlex did not name")
         if o.get("country_code"):
@@ -520,6 +532,21 @@ def fetch_openalex_source(client: RobustHTTPClient, issn: str, mailto: str = "")
         signals.append(_signal(SIGNAL_OPENALEX_WORKS, SOURCE_OPENALEX, endpoint,
                                works_count=int(works), publisher=data.get("host_organization_name") or None,
                                country_code=data.get("country_code") or None))
+
+    # OpenAlex's own journal-level numbers. The 2-year mean citedness is the one
+    # open counterpart of an impact factor there is: OpenAlex computes it over
+    # the works it indexes and publishes it CC0, so Section 18 can print a
+    # journal-level number for every journal with no table filled in. It is not
+    # the JCR impact factor and the statement says so.
+    stats = data.get("summary_stats") if isinstance(data.get("summary_stats"), Mapping) else {}
+    citedness = _as_number(stats.get("2yr_mean_citedness"))
+    h_index = _as_number(stats.get("h_index"))
+    if citedness is not None or h_index is not None:
+        i10 = _as_number(stats.get("i10_index"))
+        signals.append(_signal(SIGNAL_OPENALEX_IMPACT, SOURCE_OPENALEX, endpoint,
+                               two_year_mean_citedness=round(citedness, 2) if citedness is not None else None,
+                               h_index=int(h_index) if h_index is not None else None,
+                               i10_index=int(i10) if i10 is not None else None))
     return signals
 
 

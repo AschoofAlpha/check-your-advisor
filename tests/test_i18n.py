@@ -326,7 +326,7 @@ rendered_constants = [
     theses.DENOMINATOR_LADDER, theses.MATCH_RULES, theses.ROSTER_LIMITS, theses.THESIS_DENOMINATOR_CAVEAT,
     evaluations.EVALUATION_CAVEATS, evaluations.EVALUATION_LIMITS, evaluations.EVALUATION_STANCE,
     journals.JOURNAL_CAVEATS, journal_risk.JOURNAL_RISK_CAVEATS,
-    impact_reference.STATUS_REASONS, impact_reference.PERCENTILE_METHOD,
+    impact_reference.STATUS_REASONS, impact_reference.PERCENTILE_METHOD, report._GLANCE_GIST,
 ]
 # A catalog key whose source sentence was edited is an orphan: it would pair the
 # new sentence with nothing and keep the old meaning around. Known strings are the

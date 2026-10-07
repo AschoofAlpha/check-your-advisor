@@ -1,0 +1,17 @@
+{
+  "name": "check-your-advisor",
+  "description": "查导师 · Advisor due diligence from the publication record, one plugin.",
+  "owner": {
+    "name": "AschoofAlpha",
+    "url": "https://github.com/AschoofAlpha"
+  },
+  "plugins": [
+    {
+      "name": "check-your-advisor",
+      "source": ".",
+      "description": "查导师：把发表记录读成带分母的事实，不替你下结论。Read what PubMed and OpenAlex record about a PI and report it back as counts with their denominators.",
+      "category": "research",
+      "tags": ["pubmed", "openalex", "advisor", "graduate-school", "bibliometrics"]
+    }
+  ]
+}

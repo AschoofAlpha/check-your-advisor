@@ -77,7 +77,13 @@ from ..evaluations import (
     EVALUATION_STANCE,
     join_evaluations,
 )
-from ..journal_risk import JOURNAL_RISK_CAVEATS, SOURCE_ORDER, describe_signal, join_risk
+from ..journal_risk import (
+    JOURNAL_RISK_CAVEATS,
+    SIGNAL_OPENALEX_IMPACT,
+    SOURCE_ORDER,
+    describe_signal,
+    join_risk,
+)
 from ..journals import (
     EDITIONS,
     JOURNAL_CAVEATS,
@@ -304,8 +310,10 @@ WARNINGS: dict[str, tuple[str, str, str]] = {
            "No paper in this corpus passed identity verification, so the harvest fell back to keeping "
            "everything it found. This corpus is 'every paper by anyone publishing under this name' and "
            "may describe several different researchers.",
-           "Configure orcid, affiliation_keywords or email_domains — or resolve an OpenAlex author id "
-           "with `harvest --resolve-openalex` — and harvest again."),
+           "Configure orcid, the advisor's own email address (`--author-email`, matched whole — the "
+           "one a namesake cannot share), affiliation_keywords or email_domains — or resolve an "
+           "OpenAlex author id with `harvest --resolve-openalex` — and harvest again. Section 1 "
+           "lists the addresses and departments the bylines printed beside this name."),
     "G3": ("weak identity config",
            # Placeholder only. Every G3 raised by `check_identity_warnings` carries one of
            # `G3_SITUATIONS` instead, chosen from what the evidence actually reached; this
@@ -315,6 +323,8 @@ WARNINGS: dict[str, tuple[str, str, str]] = {
            "so the records it did not reach are name matches and nothing more. For any common "
            "surname that blends several people, and nothing below can tell them apart.",
            "Set orcid, email_domains or affiliation_keywords to a value the records themselves carry "
+           "(the advisor's own address, given with `--author-email`, is the value a namesake cannot "
+           "share; Section 1 lists the addresses the bylines printed) "
            "— a key that matches nothing is worth exactly what no key is worth, and this warning now "
            "counts matches rather than settings — and harvest again. An openalex_author_id "
            "alone clears this only once it reaches min_openalex_record_share of the corpus, and "
@@ -2430,6 +2440,46 @@ def _evidence_lines(prov: Mapping[str, Any]) -> list[str]:
     return lines
 
 
+def _has_unique_evidence(identity: Mapping[str, Any]) -> bool:
+    """An ORCID or a whole email address: evidence a namesake at the same institution cannot share."""
+    return bool(str(identity.get("orcid") or "").strip()) or any(
+        "@" in str(entry).strip().lstrip("@") for entry in identity.get("email_domains") or []
+    )
+
+
+def _counted(pairs: Any) -> str:
+    """`a (12), b (3)` from `[[a, 12], [b, 3]]`, or "" for anything else."""
+    items = [pair for pair in (pairs if isinstance(pairs, list) else [])
+             if isinstance(pair, (list, tuple)) and len(pair) == 2]
+    return en(", ").join(en("{value} ({count})", value=value, count=count) for value, count in items)
+
+
+def _identity_hint_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> list[str]:
+    """What the bylines printed beside the name, when nothing near-unique pinned the person.
+
+    `harvest` counts it before its identity filter runs, over every fetched record
+    where the name holds a lead slot (`pubmed_api.identity_hints`). Printed only
+    when neither an ORCID nor the advisor's own address was given: then these are
+    the people the filter chose between, and a reader who recognises their
+    advisor's address in the list has the strongest evidence short of an ORCID.
+    """
+    hints = _readable_block(query.get("identity_hints"))
+    if not hints or _has_unique_evidence(identity) or not hints.get("records_examined"):
+        return []
+    emails = _counted(hints.get("emails")) or en("none printed")
+    labels = _counted(hints.get("affiliations")) or en("none printed")
+    return [
+        en("- printed beside {name} in a first, last or corresponding slot, over the "
+           "{records_examined} fetched records where it holds one (counted before the "
+           "identity filter): emails {emails}; departments {labels}. Namesakes separate "
+           "here. If one address is the advisor's, re-harvest with `--author-email` set to "
+           "it — the strongest evidence short of an ORCID; failing that, the department is "
+           "the next best `--affiliation-keyword`",
+           name=hints.get("name") or en("the name"), records_examined=hints["records_examined"],
+           emails=emails, labels=labels),
+    ]
+
+
 def _provenance_body(prov: dict[str, Any]) -> list[str]:
     # `build_report` already empties a `query` that is not a mapping, but this
     # function is also called with a provenance dict assembled by hand and the
@@ -2469,13 +2519,28 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
            "from the other keys in the same block. Re-harvest to rewrite the file.",
            inconsistent=inconsistent)
     ] if inconsistent and not isinstance(inconsistent, Mapping) else []
-    lines = [
+    # `harvest --source openalex` never asks PubMed, and every line below that
+    # describes the esearch query, its coverage or its efetch counts would print
+    # "?" over a search that did not happen. One line says so instead, and says
+    # how to read the PubMed wording elsewhere on the page.
+    pubmed_searched = query.get("pubmed_searched", True) is not False
+    search_lines = [
         en("- esearch term: `{term}`", term=query.get('term', '')),
         en("- date range: {mindate} to {maxdate} (years_back={years_back})", mindate=query.get('mindate', '?'), maxdate=query.get('maxdate', '?'), years_back=query.get('years_back', '?')),
+    ] if pubmed_searched else [
+        en("- PubMed: not searched — this corpus was harvested from OpenAlex alone "
+           "(`harvest --source openalex`), which indexes every field rather than "
+           "biomedicine only. Wherever this report says \"PubMed record\", read \"OpenAlex "
+           "work\"; the esearch, coverage and fetched / kept / rejected lines a PubMed "
+           "harvest prints here do not apply (years_back={years_back})",
+           years_back=query.get('years_back', '?')),
+    ]
+    lines = [
+        *search_lines,
         *block_unreadable,
         *inconsistency_unreadable,
         *_unreadable_lines(_readable_block(prov.get("unreadable"))),
-        *_coverage_lines(query),
+        *(_coverage_lines(query) if pubmed_searched else []),
         *_source_lines(counts, prov["corpus_size"]),
         *_openalex_lines(query, identity),
         # All three are PubMed-side counts and say so, because the merged corpus
@@ -2494,7 +2559,7 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
         # each other over the same records under a word that claimed more than
         # the filter checked. The key in the corpus file is untouched — renaming
         # it would strand every file already written — so this line names both.
-        en("- PubMed records: fetched {fetched} / kept {verified} / rejected "
+        *([] if not pubmed_searched else [en("- PubMed records: fetched {fetched} / kept {verified} / rejected "
            "{rejected} (fetched = parsed out of efetch; kept = the target name held a "
            "first / corresponding / last-author slot and the record cleared the "
            "identity filter — with require_affiliation=false that filter also passes "
@@ -2504,11 +2569,12 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
            "= fetched - kept. Both are counted before any fallback, so a fired "
            "fallback shows kept 0; the merged corpus is counted separately above; the "
            "corpus file records this number under its original key `verified`)",
-           fetched=counts.get('fetched', '?'), verified=counts.get('verified', '?'), rejected=counts.get('rejected', '?')),
+           fetched=counts.get('fetched', '?'), verified=counts.get('verified', '?'), rejected=counts.get('rejected', '?'))]),
         *_evidence_lines(prov),
         en("- identity: orcid={orcid}; affiliation_keywords={n_affiliation_keywords}; "
            "email_domains={n_email_domains}",
            orcid=identity.get('orcid') or en('(none)'), n_affiliation_keywords=len(identity.get('affiliation_keywords') or []), n_email_domains=len(identity.get('email_domains') or [])),
+        *_identity_hint_lines(query, identity),
         en("- effective require_affiliation: {require_affiliation_effective}", require_affiliation_effective=en(identity.get('require_affiliation_effective', 'unknown'))),
         en("- position_filtered: {position_filtered}", position_filtered=prov['position_filtered']),
         en("- identity fallback fired: {fallback_fired}", fallback_fired=prov['fallback_fired'])
@@ -3595,6 +3661,12 @@ def _graduates_body(graduates: dict[str, Any] | None, note: str) -> list[str]:
         en("- file: `{path}` (read as {encoding})", path=provenance.get('path') or en('not recorded'), encoding=provenance.get('encoding') or en('unknown encoding')),
         en("- libraries: {source_dbs}", source_dbs=_fmt_input(provenance.get('source_dbs')) or en('not recorded')),
         en("- export dates: {export_dates}", export_dates=_fmt_input(provenance.get('export_dates')) or en('not recorded')),
+        *([en("- given on the command line for the whole file, which has no such column: {filled}",
+              filled=en("; ").join(
+                  en("{column} = {value}", column={"source_db": "库来源", "export_date": "导出日期"}.get(k, k),
+                     value=v)
+                  for k, v in sorted(provenance["columns_filled"].items())))]
+          if isinstance(provenance.get("columns_filled"), Mapping) and provenance.get("columns_filled") else []),
         en("- awarding institutions: {institutions}", institutions=_fmt_input(provenance.get('institutions')) or en('not recorded')),
         en("- rows read {rows_read}; rejected {rejected}; exact duplicates dropped "
            "{duplicates_dropped}",
@@ -3693,6 +3765,53 @@ def _risk_cells(risk: dict[str, Any] | None) -> dict[str, str]:
     return cells
 
 
+def _open_metric_lines(journals: Mapping[str, Any], risk: Mapping[str, Any] | None) -> list[str]:
+    """OpenAlex's own journal-level numbers, one row per journal, with no table to fill in.
+
+    Read off the `openalex_impact` signal `journal-risk` collects, so they need no
+    hand lookup and carry the date they were read. They are a different number
+    from the impact factor and the partitions above and are never put in those
+    columns: OpenAlex computes them over the works it indexes, and the JCR and the
+    CAS tables count differently.
+    """
+    if not risk or risk.get("risk_missing"):
+        return [
+            "",
+            en("**Open journal-level numbers: not collected.** `check-your-advisor journal-risk "
+               "--output-dir <corpus dir>` fills in OpenAlex's 2-year mean citedness and h-index for "
+               "every journal here, with no table to fill in."),
+        ]
+    by_journal: dict[str, Mapping[str, Any]] = {}
+    for row in risk.get("rows") or []:
+        for signal in row.get("signals") or []:
+            if signal.get("signal") == SIGNAL_OPENALEX_IMPACT:
+                by_journal[str(row.get("journal") or "")] = signal.get("observed") or {}
+    stamps = sorted(str(row.get("fetched_at") or "")[:10] for row in risk.get("rows") or []
+                    if row.get("fetched_at"))
+    lines = [
+        "",
+        en("**Open journal-level numbers, from OpenAlex** (read by `journal-risk`, {dates}; no table "
+           "needed). OpenAlex computes these over the works it indexes. They are not the JCR impact "
+           "factor or a CAS partition, and like every number in this section they describe a "
+           "journal, never any one paper in it. OpenAlex returned them for {found} of {total} "
+           "journals.",
+           dates=en(" to ").join(sorted({stamps[0], stamps[-1]})) if stamps else en("date not recorded"),
+           found=len(by_journal), total=len(journals.get("journals") or [])),
+        "",
+        en("| journal | papers | 2-year mean citedness | h-index |"),
+        "|---|---|---|---|",
+    ]
+    for result in journals.get("journals") or []:
+        observed = by_journal.get(str(result.get("journal") or ""), {})
+        citedness = observed.get("two_year_mean_citedness")
+        h_index = observed.get("h_index")
+        lines.append(
+            f"| {result['journal']} | {result['paper_count']} | "
+            f"{citedness if citedness is not None else '-'} | {h_index if h_index is not None else '-'} |"
+        )
+    return lines
+
+
 def _journal_body(journals: dict[str, Any] | None, note: str,
                   risk: dict[str, Any] | None = None) -> list[str]:
     """Section 18. The joined journal metrics, or a stated absence — never a blank cell."""
@@ -3713,6 +3832,7 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
                "{denominator}",
                papers_with_journal=journals['papers_with_journal'], denominator=journals['denominator']),
             en("- records carrying none: {papers_without_journal} of {denominator}", papers_without_journal=journals['papers_without_journal'], denominator=journals['denominator']),
+            *_open_metric_lines(journals, risk),
             "",
             en("That first number is the whole size of the job: nobody is looking up twenty thousand "
                "journals, and nobody has to. Run `check-your-advisor journal-worklist --output-dir "
@@ -3806,6 +3926,7 @@ def _journal_body(journals: dict[str, Any] | None, note: str,
                papers_without_journal=journals['papers_without_journal'])
         )
 
+    lines += _open_metric_lines(journals, risk)
     lines += [
         "",
         en("- journals in this corpus that the table does not contain: "
@@ -4179,6 +4300,194 @@ def _evaluations_body(evaluations: dict[str, Any] | None, note: str) -> list[str
 # --- Output ---
 
 
+#: One line of consequence per warning, for the summary. The full sentence, the
+#: observed values and the fix stay at the top of the sections the warning names.
+_GLANCE_GIST: dict[str, str] = {
+    "G1": "every count is a floor — part of what the query matched was never retrieved",
+    "G2": "nothing passed identity verification, so this may be several people",
+    "G3": "identity evidence reached too little of the corpus, so this may be several people",
+    "G7": "the target name was not found on the bylines",
+}
+
+
+def GLANCE_LEDE() -> str:
+    """The sentence under the summary's heading, on both pages."""
+    return en("Each line is a count with its denominator, copied from the section named beside it; "
+              "none of them is a verdict, and the sections below give the definitions and caveats.")
+
+
+def glance_lines(report: Mapping[str, Any]) -> list[str]:
+    """The at-a-glance summary: a dozen lines a student can read before deciding to read on.
+
+    Each line is a count with its denominator, copied from the section it names —
+    nothing here is computed that a section does not already print, so the
+    summary cannot disagree with the page it sits on, and nothing here is a
+    verdict. Warnings come first, because every other line is read through them.
+    A metric the section suppresses is said to be suppressed rather than given a
+    number. A refused report gets no summary: its whole page is already one gate.
+    """
+    if report.get("refused"):
+        return []
+    metrics = report.get("metrics") or {}
+    prov = report.get("provenance") or {}
+    query = prov.get("query") if isinstance(prov.get("query"), Mapping) else {}
+    lines: list[str] = []
+
+    warnings = report.get("warnings") or []
+    if warnings:
+        lines.append(en(
+            "**{n} warning(s) — read the top of Section 0 first:** {items}.",
+            n=len(warnings),
+            items=en("; ").join(
+                en("{id} ({name}): {gist}", id=w["id"], name=en(w["name"]),
+                   gist=en(_GLANCE_GIST.get(w["id"], "see the section it names")))
+                for w in warnings)))
+
+    sources = [str(s) for s in (query.get("sources") or ([] if query.get("pubmed_searched") is False
+                                                          else ["pubmed"]))]
+    source_names = {"pubmed": "PubMed", "openalex": "OpenAlex"}
+    lines.append(en(
+        "{records} records from {start} to {end}, from {sources}, naming {people} people (Sections 1–2).",
+        records=prov.get("corpus_size", "?"), start=prov.get("window_start_year", "?"),
+        end=prov.get("window_end_year", "?"),
+        sources=en(" and ").join(source_names.get(s, s) for s in sources) or "?",
+        people=prov.get("n_people", "?")))
+
+    roster = metrics.get("s2") or {}
+    rows = roster.get("rows") or []
+    total_slots = sum(int(row.get("n_first_slots") or 0) for row in rows)
+    if rows and total_slots and not roster.get("suppressed"):
+        top = rank_people(rows, by="first_slots")["ranked"][:2]
+        lines.append(en(
+            "First-author slots: the {n} people named hold {total} between them, and the {k} "
+            "holding the most hold {top} of those (Section 2).",
+            k=len(top), top=sum(int(row["n_first_slots"]) for row in top), total=total_slots,
+            n=len(rows)))
+
+    lead = metrics.get("s3b") or {}
+    if lead and not lead.get("suppressed"):
+        counts = lead.get("counts") or {}
+        lines.append(en(
+            "Of {denominator} people, {held} held a first-author slot, {without} were observed for "
+            "{lag} or more years without one, and {recent} appeared too recently to tell (Section 3).",
+            denominator=lead.get("denominator", "?"), held=counts.get("holds_lead", 0),
+            without=counts.get("observed_without_lead", 0), lag=lead.get("lag_years", "?"),
+            recent=counts.get("too_recent", 0)))
+
+    wait = metrics.get("s4") or {}
+    if wait.get("not_computable"):
+        pass
+    elif wait and wait.get("suppressed"):
+        lines.append(en("Time to a first first-author slot: too few people to aggregate (Section 4)."))
+    elif wait and wait.get("median") is not None:
+        lines.append(en(
+            "Time to a first first-author slot: median {median} years over the {denominator} people "
+            "who reached one, {at_zero} of them already in it on their first record; {without} people "
+            "have none yet, and the median leaves them out (Section 4).",
+            median=_fmt_number(wait["median"]), denominator=wait.get("denominator", "?"),
+            at_zero=wait.get("count_at_zero", "?"), without=len(wait.get("still_without_lead") or [])))
+
+    span = metrics.get("s5") or {}
+    if span and span.get("suppressed"):
+        lines.append(en("Observed activity span: too few people to aggregate (Section 5)."))
+    elif span and span.get("median") is not None:
+        low, high = (span.get("iqr") or (None, None))[:2]
+        buckets = span.get("buckets") or {}
+        lines.append(en(
+            "Observed span from a person's first record to their last: median {median} years "
+            "(IQR {low}–{high}) over {complete} people seen start and finish; {right} were still "
+            "appearing when the window closed (Section 5).",
+            median=_fmt_number(span["median"]), low=_fmt_number(low), high=_fmt_number(high),
+            complete=buckets.get("complete", "?"),
+            right=int(buckets.get("right_censored", 0) or 0) + int(buckets.get("both_censored", 0) or 0)))
+
+    position = metrics.get("s7") or {}
+    if position.get("measured") and not position.get("suppressed"):
+        counts = position.get("counts") or {}
+        lines.append(en(
+            "The PI's own byline position: last author on {last} of {denominator} records, first "
+            "author on {first}, sole author on {sole}, in the middle on {middle} (Section 7).",
+            last=counts.get("last", 0), denominator=position.get("denominator", "?"),
+            first=counts.get("first", 0), sole=counts.get("sole", 0), middle=counts.get("middle", 0)))
+
+    per_year = [row for row in (metrics.get("s9") or {}).get("years") or [] if isinstance(row, Mapping)]
+    full_years = [row for row in per_year if not row.get("partial") and not row.get("indexing_lag")]
+    if full_years:
+        counts_by_year = [int(row.get("count") or 0) for row in full_years]
+        lines.append(en(
+            "Records per year over the {n} complete years: {low} to {high}, and {latest} in {year}, "
+            "the latest of them; partial and indexing-lagged years are left out here (Section 9).",
+            low=min(counts_by_year), high=max(counts_by_year), n=len(full_years),
+            latest=counts_by_year[-1], year=full_years[-1].get("year", "?")))
+
+    team = metrics.get("s10") or {}
+    if team and not team.get("suppressed") and team.get("median") is not None:
+        low, high = (team.get("iqr") or (None, None))[:2]
+        lines.append(en(
+            "Team size: median {median} authors per record (IQR {low}–{high}) (Section 10).",
+            median=_fmt_number(team["median"]), low=_fmt_number(low), high=_fmt_number(high)))
+
+    venues = metrics.get("s11") or {}
+    repeated = [item for item in venues.get("repeated") or [] if isinstance(item, (list, tuple)) and len(item) == 2]
+    if repeated and not venues.get("suppressed"):
+        journal, count = repeated[0]
+        lines.append(en(
+            "Venues: journals carrying more than one record, {n}; the most frequent is {journal}, "
+            "with {count} of {denominator} records (Section 11).",
+            n=len(repeated), journal=journal, count=count, denominator=venues.get("denominator", "?")))
+
+    impact = report.get("impact")
+    if impact:
+        lines.append(en(
+            "Citations: h-index {h_index} within this window only, over {covered} of {denominator} "
+            "records with a citation count (Section 15).",
+            h_index=impact.get("h_index") if impact.get("h_index") is not None else en("suppressed"),
+            covered=impact.get("covered", "?"), denominator=impact.get("denominator", "?")))
+    else:
+        lines.append(en("Citations: not collected — run `cite` before `profile` (Section 15)."))
+
+    score = report.get("score") or {}
+    stars = report.get("stars") or {}
+    if score and not score.get("suppressed") and score.get("score") is not None:
+        lines.append(en(
+            "Composite score: {score} out of 100, {stars} of {max_stars} stars, from {used} of "
+            "{registered} components that had data; Section 16 prints every input and weight.",
+            score=score["score"], stars=stars.get("stars", "?"), max_stars=stars.get("max_stars", "?"),
+            used=score.get("denominator", "?"), registered=score.get("components_registered", "?")))
+    elif score:
+        lines.append(en("Composite score: withheld — too few components had data (Section 16)."))
+
+    risk = report.get("journal_risk") or {}
+    if risk and not risk.get("risk_missing"):
+        with_numbers = sum(
+            1 for row in risk.get("rows") or []
+            if any(signal.get("signal") == SIGNAL_OPENALEX_IMPACT for signal in row.get("signals") or []))
+        lines.append(en(
+            "Open journal-level numbers from OpenAlex (2-year mean citedness, h-index): {found} of "
+            "{total} journals; no table needed (Section 18).",
+            found=with_numbers, total=risk.get("journal_denominator", "?")))
+    else:
+        lines.append(en(
+            "Open journal-level numbers from OpenAlex: not collected — run `journal-risk` before "
+            "`profile` (Section 18)."))
+
+    supplied = [
+        # `journals` is a dict even with no table — the corpus's own venues with
+        # their cells marked unsupplied — so the note is what says a table came in.
+        (en("journal metrics"), not report.get("journal_note"), 18),
+        (en("thesis roster"), report.get("graduates") is not None, 17),
+        (en("student evaluations"), report.get("evaluations") is not None, 20),
+    ]
+    lines.append(en(
+        "Hand-filled tables: {states}. Each absent one is named in its section with the command that "
+        "adds it.",
+        states=en("; ").join(
+            en("{table} {state} (Section {section})", table=table,
+               state=en("supplied") if present else en("not supplied"), section=section)
+            for table, present, section in supplied)))
+    return lines
+
+
 def render_markdown(report: dict[str, Any]) -> str:
     """
     Markdown rendering.
@@ -4221,6 +4530,10 @@ def _render_markdown(report: Mapping[str, Any]) -> str:
         ])
 
     parts = [title, "", en("_Generated {generated_at}._", generated_at=report['generated_at']), ""]
+    glance = glance_lines(report)
+    if glance:
+        parts += [en("**At a glance.** {lede}", lede=GLANCE_LEDE()), ""]
+        parts += [f"- {line}" for line in glance] + [""]
     for section in report["sections"]:
         parts += [f"## {section['id']}. {section['title']}", ""]
         # Before the prose, and `.get` so a section dict built by an older caller

@@ -291,7 +291,36 @@ def author_candidate(author: Mapping[str, Any]) -> dict[str, Any]:
         "works_count": author.get("works_count"),
         "cited_by_count": author.get("cited_by_count"),
         "institutions": _institutions(author),
+        # What the candidate works on, by OpenAlex's own topic assignment. Two
+        # people sharing a common name at one university are usually told apart
+        # fastest this way — cardiology and computer vision do not overlap — and
+        # unlike `works_count` it says nothing about who is more prolific.
+        "topics": _topics(author),
     }
+
+
+def _topics(author: Mapping[str, Any], limit: int = 3) -> list[str]:
+    """The candidate's top OpenAlex topics, as `topic (field)`, most works first.
+
+    OpenAlex lists `topics` ordered by how many of the author's works carry each.
+    The field is kept beside the topic because a topic name alone ("Image
+    Processing") can be read in more than one discipline. An author record
+    without the key, or with entries missing a name, yields fewer entries rather
+    than an error.
+    """
+    found: list[str] = []
+    for item in author.get("topics") or []:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("display_name") or "").strip()
+        if not name:
+            continue
+        field = item.get("field") if isinstance(item.get("field"), Mapping) else {}
+        field_name = str((field or {}).get("display_name") or "").strip()
+        found.append(f"{name} ({field_name})" if field_name else name)
+        if len(found) >= limit:
+            break
+    return found
 
 
 def resolve_author(
@@ -367,7 +396,7 @@ def resolve_author(
     if len(candidates) == 1:
         chosen = candidates[0]
         logger.warning(
-            "OpenAlex 作者消歧只返回一个候选并已自动采纳：%s (%s)，ORCID=%s，作品数=%s，机构=%s。"
+            "OpenAlex 作者消歧只返回一个候选并已自动采纳：%s (%s)，ORCID=%s，作品数=%s，机构=%s，方向=%s。"
             "**这不是确认**——检索用的是 display_name.search 模糊匹配，唯一候选完全可能是同名的"
             "另一个人，也可能是本人被拆成多个 profile 后只命中了其中一个。请照上面的机构和作品数"
             "核对一眼；不对就加 --openalex-author-id <正确的 ID> 重跑。",
@@ -375,6 +404,7 @@ def resolve_author(
             chosen["orcid"] or "无",
             chosen["works_count"] if chosen["works_count"] is not None else "?",
             zh("、").join(inst["display_name"] for inst in chosen["institutions"]) or "未记录",
+            "; ".join(chosen["topics"]) or "未记录",
         )
         return _resolution("unique", query=query, candidates=candidates,
                            author_id=chosen["openalex_author_id"], now=now)
@@ -386,7 +416,7 @@ def resolve_author(
     )
     for index, candidate in enumerate(candidates, 1):
         logger.warning(
-            "  候选 %d/%d: %s | ID=%s | ORCID=%s | 作品数=%s | 被引=%s | 机构: %s",
+            "  候选 %d/%d: %s | ID=%s | ORCID=%s | 作品数=%s | 被引=%s | 机构: %s | 方向: %s",
             index, len(candidates), candidate["display_name"],
             candidate["openalex_author_id"], candidate["orcid"] or "无",
             candidate["works_count"] if candidate["works_count"] is not None else "?",
@@ -396,6 +426,7 @@ def resolve_author(
                 + (f"（{inst['years'][0]}-{inst['years'][-1]}）" if inst["years"] else "")
                 for inst in candidate["institutions"]
             ) or "未记录",
+            "; ".join(candidate["topics"]) or "未记录",
         )
     logger.warning(
         "作品数最多的那位不是答案——按作品数挑等于用产量代替身份，和只按姓名匹配是同一个错误。"
