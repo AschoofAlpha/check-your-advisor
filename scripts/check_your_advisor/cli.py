@@ -1004,8 +1004,11 @@ def cmd_cite(argv: list[str]):
     denominator = payload["denominator"]
     logger.info("=" * 60)
     logger.info("引用数文件: %s", citations_path)
-    logger.info("覆盖: %d/%d 篇拿到引用数（其余三级源均未命中，这是查找的结果，不是论文的属性）",
-                denominator["papers_with_citations"], denominator["papers_total"])
+    if denominator["papers_with_citations"] < denominator["papers_total"]:
+        logger.info("覆盖: %d/%d 篇拿到引用数（其余三级源均未命中，这是查找的结果，不是论文的属性）",
+                    denominator["papers_with_citations"], denominator["papers_total"])
+    else:
+        logger.info("覆盖: %d/%d 篇都拿到了引用数", denominator["papers_with_citations"], denominator["papers_total"])
 
     if args.percentile:
         _locate_in_reference(papers, payload, json_path, output_dir, cfg)
@@ -2742,8 +2745,12 @@ def cmd_fetch(argv: list[str]):
         + (["openalex"] if openalex_works.get("merged") else [])
     )
     if not matched_papers:
-        logger.error("这次没有取到任何可用的论文（PubMed 为零，OpenAlex 也没有本人在第一/末位/通讯位的作品），"
-                     "不写语料文件。")
+        if source == "openalex":
+            logger.error("这次没有取到任何可用的论文（OpenAlex 没有返回本人在第一/末位/通讯位的作品，"
+                         "或者取作品时失败了，见上），不写语料文件。")
+        else:
+            logger.error("这次没有取到任何可用的论文（PubMed 为零，OpenAlex 也没有本人在第一/末位/通讯位的作品），"
+                         "不写语料文件。")
         return 1
 
     matched_papers.sort(key=lambda x: x.get("pub_year", "0"), reverse=True)

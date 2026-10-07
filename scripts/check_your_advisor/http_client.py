@@ -34,6 +34,7 @@ fresh clone could not run anything. What it cost to remove, stated plainly:
 import codecs
 import gzip
 import logging
+import os
 import random
 import time
 import zlib
@@ -91,6 +92,17 @@ PROJECT_USER_AGENT = "check-your-advisor/1.0"
 # /1.0` beside `Sec-Ch-Ua-Platform: "Windows"` is not an honest request, it is
 # an incoherent one.
 _BROWSER_ONLY_HEADERS = ("sec-", "dnt")
+
+
+#: OpenAlex meters its API: data is free, use is billed against a daily budget,
+#: $0.10 a day without a key and ten times that with a free one (help.openalex.org,
+#: "Authentication"). A key in this environment variable is sent to
+#: api.openalex.org as a bearer token and to no other host; it never enters a URL,
+#: so it reaches neither the logs nor the response cache's keys.
+OPENALEX_KEY_ENV = "OPENALEX_API_KEY"
+OPENALEX_HOST = "api.openalex.org"
+
+_openalex_budget_hint_shown = False
 
 
 def polite_headers(mailto: str = "") -> dict:
@@ -311,6 +323,9 @@ class RobustHTTPClient:
                 for key in list(headers):
                     if key.lower().startswith(_BROWSER_ONLY_HEADERS):
                         del headers[key]
+        openalex_key = os.environ.get(OPENALEX_KEY_ENV, "").strip()
+        if openalex_key and urlparse(url).netloc.lower() == OPENALEX_HOST:
+            headers["Authorization"] = f"Bearer {openalex_key}"
 
         effective_timeout = timeout or self.timeout
         proxy = self._get_proxy()
@@ -381,6 +396,13 @@ class RobustHTTPClient:
             elif resp.status_code == 429:
                 retry_after = self._retry_after(resp, 30)
                 logger.warning("  ⚠ 429 Rate Limited from %s — 等待 %ds", domain, retry_after)
+                global _openalex_budget_hint_shown
+                if domain.lower() == OPENALEX_HOST and not _openalex_budget_hint_shown:
+                    _openalex_budget_hint_shown = True
+                    logger.warning(
+                        "OpenAlex 返回 429：今天的免费额度用完了，或者请求太快。不带 key 每天只有约 0.1 美元"
+                        "的额度；到 https://openalex.org/settings/api 免费申请一个 key，设成环境变量 %s，"
+                        "额度提高到 10 倍。额度在 UTC 零点重置。", OPENALEX_KEY_ENV)
                 time.sleep(retry_after)
 
             return resp

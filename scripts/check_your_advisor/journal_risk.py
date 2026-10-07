@@ -146,6 +146,13 @@ SIGNAL_OPENALEX_APC = "openalex_apc_usd"
 SIGNAL_OPENALEX_WORKS = "openalex_works_count"
 SIGNAL_OPENALEX_IMPACT = "openalex_impact"
 
+#: The source-record fields read below, requested with `select=` (checked against
+#: the live API, which rejects an unknown field with HTTP 400). A full source
+#: record also carries its topics, yearly counts and societies, read by nothing here.
+OPENALEX_SOURCE_FIELDS = ("id,display_name,issn,issn_l,summary_stats,apc_usd,country_code,"
+                          "host_organization_name,is_in_doaj,is_in_doaj_since_year,"
+                          "is_indexed_in_scopus,works_count")
+
 SIGNAL_ORDER: tuple[str, ...] = (
     SIGNAL_DOAJ_INDEXED,
     SIGNAL_DOAJ_NOT_INDEXED,
@@ -502,10 +509,14 @@ def fetch_openalex_source(client: RobustHTTPClient, issn: str, mailto: str = "")
     """
     if not issn:
         return []
+    # `endpoint` is what each statement prints as its source, so it carries no
+    # query string: the `mailto` used to ride on it, which wrote the user's own
+    # address into every Section 18 line of a report they might pass around.
     endpoint = f"https://api.openalex.org/sources/issn:{quote(issn, safe='')}"
+    url = f"{endpoint}?select={OPENALEX_SOURCE_FIELDS}"
     if mailto:
-        endpoint += f"?mailto={quote_plus(mailto)}"
-    data = _json_body(client.get(endpoint, accept_type="api", timeout=30,
+        url += f"&mailto={quote_plus(mailto)}"
+    data = _json_body(client.get(url, accept_type="api", timeout=30,
                                  extra_headers=polite_headers(mailto)), SOURCE_OPENALEX)
     if data is None:
         return []

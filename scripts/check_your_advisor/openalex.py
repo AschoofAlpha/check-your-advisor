@@ -88,14 +88,38 @@ SOURCE_OPENALEX = "openalex"
 
 AUTHORS_URL = "https://api.openalex.org/authors"
 WORKS_URL = "https://api.openalex.org/works"
+INSTITUTIONS_URL = "https://api.openalex.org/institutions"
 
-#: Works requested per page. 200 is the largest page OpenAlex's API reference
-#: documents for a list endpoint, but that is a number about their service and
-#: not one this repository has measured, so nothing here depends on it being
-#: right: a page size the server rejects produces a logged HTTP error and a
-#: `request_failed` provenance flag that the report prints, rather than an empty
-#: result that would read as "this author has no works".
-WORKS_PAGE_SIZE = 200
+#: The fields each request asks OpenAlex for, which are the fields the parsers
+#: below read. OpenAlex's documentation recommends `select=`; a full author
+#: record can carry hundreds of affiliations and a full work its whole reference
+#: list and abstract, none of which is read here. Every name was checked against
+#: the live API, which answers an unknown one with HTTP 400.
+INSTITUTION_FIELDS = "id,display_name"
+AUTHOR_FIELDS = ("id,display_name,display_name_alternatives,orcid,works_count,cited_by_count,"
+                 "affiliations,last_known_institutions,topics")
+WORK_FIELDS = ("id,doi,title,display_name,publication_year,publication_date,ids,authorships,"
+               "primary_location,biblio")
+
+#: Works requested per page. OpenAlex's rate-limit documentation gives 100 as the
+#: `per_page` maximum. The live API served 200 when this was checked, but a page
+#: size above the documented one is a number about their service this code would
+#: be relying on for no gain; nothing here depends on the size anyway, since the
+#: cursor carries on until the matched set is exhausted.
+WORKS_PAGE_SIZE = 100
+
+#: Institutions printed per candidate. A profile OpenAlex has assembled from
+#: several people sharing a name can carry dozens; past this many the line says
+#: how many there are instead of listing them all.
+INSTITUTIONS_SHOWN = 3
+
+#: From this many institutions on, the candidate list says that a merged profile
+#: is the usual reason. Measured on "Wang Wei" at Tsinghua, live: the ten
+#: candidates OpenAlex listed carried 485, 287, 102, 62, 55, 15, 14, 9, 9 and 3
+#: institutions. The first five are several people each; a single researcher with
+#: thirty works still collects a dozen entries (labs, hospitals, a visiting post),
+#: so the line is drawn well above that.
+MERGED_PROFILE_HINT_AT = 30
 
 #: Total budget for one author's works, mirroring `pubmed_api.MAX_RECORDS`: a
 #: ceiling exists so a mis-resolved author id cannot pull a consortium's entire
@@ -240,7 +264,7 @@ def _institutions(author: Mapping[str, Any]) -> list[dict[str, Any]]:
     """
     seen: dict[str, dict[str, Any]] = {}
 
-    def add(node: Any, years: Sequence[Any] = ()) -> None:
+    def add(node: Any, years: Sequence[Any] = (), last_known: bool = False) -> None:
         if not isinstance(node, Mapping):
             return
         name = str(node.get("display_name") or "").strip()
@@ -251,7 +275,9 @@ def _institutions(author: Mapping[str, Any]) -> list[dict[str, Any]]:
             "ror": str(node.get("ror") or ""),
             "country_code": str(node.get("country_code") or ""),
             "years": [],
+            "last_known": False,
         })
+        entry["last_known"] = entry["last_known"] or last_known
         for year in years:
             if isinstance(year, int) and year not in entry["years"]:
                 entry["years"].append(year)
@@ -260,12 +286,70 @@ def _institutions(author: Mapping[str, Any]) -> list[dict[str, Any]]:
         if isinstance(item, Mapping):
             add(item.get("institution"), item.get("years") or ())
     for item in author.get("last_known_institutions") or []:
-        add(item)
-    add(author.get("last_known_institution"))
+        add(item, last_known=True)
+    add(author.get("last_known_institution"), last_known=True)
 
     for entry in seen.values():
         entry["years"].sort()
     return list(seen.values())
+
+
+def institution_summary(institutions: Any, first: str = "") -> str:
+    """A candidate's institutions as one short phrase: the current ones first, at most three.
+
+    `first` names an institution to put ahead of the rest — the one an
+    `--affiliation` was resolved to — so a reader sees why the candidate matched.
+
+    The full history stays in the corpus record. What a reader picking between
+    candidates needs is where each one is now, and how many places the profile
+    claims in all, because a profile that claims thirty has usually been built
+    from several people.
+    """
+    entries = [entry for entry in (institutions or [])
+               if isinstance(entry, Mapping) and str(entry.get("display_name") or "").strip()]
+    if not entries:
+        return zh("未记录")
+    ordered = sorted(entries, key=lambda entry: (str(entry["display_name"]) != first,
+                                                 not entry.get("last_known")))
+    shown = zh("、").join(
+        str(entry["display_name"])
+        + (f"（{entry['years'][0]}-{entry['years'][-1]}）" if entry.get("years") else "")
+        for entry in ordered[:INSTITUTIONS_SHOWN]
+    )
+    if len(entries) > INSTITUTIONS_SHOWN:
+        shown += zh("等，共 {count} 个机构", count=len(entries))
+    return shown
+
+
+def resolve_institution(client: RobustHTTPClient, affiliation: str,
+                        mailto: str = "") -> dict[str, str] | None:
+    """The OpenAlex institution an `--affiliation` names: `{"id", "display_name"}`.
+
+    `{}` when OpenAlex knows no institution by that name, None when the request
+    failed. OpenAlex stopped accepting `last_known_institutions.display_name.search`
+    (HTTP 400) and filters authors by institution id only, so the name is turned
+    into an id first, with OpenAlex's own institution search, and the best match
+    is used and logged so a reader can see which institution it was.
+    """
+    affiliation = " ".join(str(affiliation or "").split())
+    if not affiliation:
+        return {}
+    url = _with_mailto(f"{INSTITUTIONS_URL}?search={quote_plus(affiliation)}&per-page=1"
+                       f"&select={INSTITUTION_FIELDS}", mailto)
+    data = _json_body(
+        client.get(url, accept_type="api", timeout=30, extra_headers=polite_headers(mailto)),
+        f"institutions?search={affiliation}",
+    )
+    if data is None:
+        return None
+    for item in data.get("results") or []:
+        if not isinstance(item, Mapping):
+            continue
+        match = re.search(r"(I\d+)\s*$", str(item.get("id") or ""), re.I)
+        if match:
+            return {"id": match.group(1).upper(),
+                    "display_name": str(item.get("display_name") or "").strip()}
+    return {}
 
 
 def author_candidate(author: Mapping[str, Any]) -> dict[str, Any]:
@@ -356,7 +440,10 @@ def resolve_author(
     `affiliation` narrows the search through OpenAlex's own institution filter
     rather than by post-filtering the results, so a name that returns forty
     people can be cut to the handful at one university without this code
-    inventing a matching rule of its own.
+    inventing a matching rule of its own. The name is first resolved to an
+    institution id (`resolve_institution`) and authors are filtered on
+    `last_known_institutions.lineage`, which also admits the departments and
+    hospitals OpenAlex files under that institution.
 
     `pubmed_follows` says whether a PubMed search comes after this lookup, which
     is all the failure and ambiguity messages differ on: under `harvest --source
@@ -368,18 +455,33 @@ def resolve_author(
         return _resolution("none", query="", candidates=[], now=now)
 
     filters = [f"display_name.search:{name}"]
+    institution: dict[str, str] = {}
+    # None once the institution lookup has failed: the author lookup is then not
+    # sent at all, since an unfiltered one would list every namesake anywhere.
+    found: dict[str, str] | None = {}
     if affiliation:
-        filters.append(f"last_known_institutions.display_name.search:{affiliation}")
+        found = resolve_institution(client, affiliation, mailto)
+        if found:
+            institution = found
+            filters.append(f"last_known_institutions.lineage:{found['id']}")
+            logger.info("机构「%s」在 OpenAlex 里是 %s（%s），候选按它和它的下属单位筛选。",
+                        affiliation, found["display_name"] or "?", found["id"])
+        elif found is not None:
+            logger.warning("OpenAlex 里找不到机构「%s」，候选不按机构筛选。可以换成英文全称再试，"
+                           "比如 Tsinghua University。", affiliation)
     query = ",".join(filters)
     url = _with_mailto(
-        f"{AUTHORS_URL}?filter={quote_plus(query)}&per-page={int(limit)}", mailto
+        f"{AUTHORS_URL}?filter={quote_plus(query)}&per-page={int(limit)}&select={AUTHOR_FIELDS}",
+        mailto,
     )
 
-    data = _json_body(
-        client.get(url, accept_type="api", timeout=30,
-                   extra_headers=polite_headers(mailto)),
-        f"authors?{query}",
-    )
+    data = None
+    if found is not None:
+        data = _json_body(
+            client.get(url, accept_type="api", timeout=30,
+                       extra_headers=polite_headers(mailto)),
+            f"authors?{query}",
+        )
     if data is None:
         if pubmed_follows:
             logger.warning(
@@ -398,11 +500,14 @@ def resolve_author(
         author_candidate(item) for item in (results if isinstance(results, list) else [])
         if isinstance(item, Mapping) and normalise_openalex_id(item.get("id"))
     ]
+    meta = data.get("meta") if isinstance(data.get("meta"), Mapping) else {}
+    total = meta.get("count") if isinstance(meta.get("count"), int) else len(candidates)
+    extra = {"total_candidates": max(total, len(candidates)), "institution": institution}
 
     if not candidates:
         logger.warning("OpenAlex 里没有匹配「%s」%s的作者。", name,
                        zh("（机构含「{affiliation}」）", affiliation=affiliation) if affiliation else "")
-        return _resolution("none", query=query, candidates=[], now=now)
+        return _resolution("none", query=query, candidates=[], now=now, **extra)
 
     if len(candidates) == 1:
         chosen = candidates[0]
@@ -414,23 +519,37 @@ def resolve_author(
             chosen["display_name"], chosen["openalex_author_id"],
             chosen["orcid"] or "无",
             chosen["works_count"] if chosen["works_count"] is not None else "?",
-            zh("、").join(inst["display_name"] for inst in chosen["institutions"]) or "未记录",
-            "; ".join(chosen["topics"]) or "未记录",
+            institution_summary(chosen["institutions"], institution.get("display_name", "")),
+            "; ".join(chosen["topics"]) or zh("未记录"),
         )
+        if len(chosen["institutions"]) >= MERGED_PROFILE_HINT_AT:
+            logger.warning(
+                "这个档案挂着 %d 个机构。一个人的履历很少有这么多，常见原因是 OpenAlex 把几个"
+                "同名的人并成了一个档案，按它取回的论文多半不全是本人的。有 ORCID 或导师本人"
+                "的邮箱的话，换用 --orcid 或 --author-email 更可靠。",
+                len(chosen["institutions"]),
+            )
         return _resolution("unique", query=query, candidates=candidates,
-                           author_id=chosen["openalex_author_id"], now=now)
+                           author_id=chosen["openalex_author_id"], now=now, **extra)
 
     if pubmed_follows:
         logger.warning(
             "OpenAlex 里「%s」对应 %d 位候选作者，**不替你选**。下面逐条列出，"
             "认出是哪一位后加 --openalex-author-id <ID> 重跑即可；本次检索按 PubMed 单源进行。",
-            name, len(candidates),
+            name, total,
         )
     else:
         logger.warning(
             "OpenAlex 里「%s」对应 %d 位候选作者，**不替你选**。下面逐条列出，"
             "认出是哪一位后加 --openalex-author-id <ID> 重跑即可。",
-            name, len(candidates),
+            name, total,
+        )
+    if total > len(candidates):
+        logger.warning(
+            "（一共 %d 位，这里只列出前 %d 位。名字这么常见时，ORCID 或导师本人的邮箱"
+            "（--orcid / --author-email）比在候选里挑更可靠；也可以在 openalex.org 搜这个名字，"
+            "认出本人后用 --openalex-author-id。）",
+            total, len(candidates),
         )
     for index, candidate in enumerate(candidates, 1):
         logger.warning(
@@ -439,17 +558,21 @@ def resolve_author(
             candidate["openalex_author_id"], candidate["orcid"] or "无",
             candidate["works_count"] if candidate["works_count"] is not None else "?",
             candidate["cited_by_count"] if candidate["cited_by_count"] is not None else "?",
-            zh("、").join(
-                f"{inst['display_name']}"
-                + (f"（{inst['years'][0]}-{inst['years'][-1]}）" if inst["years"] else "")
-                for inst in candidate["institutions"]
-            ) or "未记录",
-            "; ".join(candidate["topics"]) or "未记录",
+            institution_summary(candidate["institutions"], institution.get("display_name", "")),
+            "; ".join(candidate["topics"]) or zh("未记录"),
+        )
+    merged = sum(1 for candidate in candidates
+                 if len(candidate["institutions"]) >= MERGED_PROFILE_HINT_AT)
+    if merged:
+        logger.warning(
+            "其中 %d 位的档案挂着 %d 个以上机构。一个人的履历很少有这么多，常见原因是 OpenAlex "
+            "把几个同名的人并成了一个档案，按这种档案取回的论文多半不全是同一个人的。",
+            merged, MERGED_PROFILE_HINT_AT,
         )
     logger.warning(
         "作品数最多的那位不是答案——按作品数挑等于用产量代替身份，和只按姓名匹配是同一个错误。"
     )
-    return _resolution("ambiguous", query=query, candidates=candidates, now=now)
+    return _resolution("ambiguous", query=query, candidates=candidates, now=now, **extra)
 
 
 def _resolution(
@@ -458,6 +581,8 @@ def _resolution(
     candidates: Sequence[Mapping[str, Any]],
     author_id: str = "",
     now: datetime | None = None,
+    total_candidates: int | None = None,
+    institution: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     """The corpus-side record of one resolution attempt.
 
@@ -471,6 +596,10 @@ def _resolution(
         "openalex_author_id": author_id,
         "candidates": [dict(candidate) for candidate in candidates],
         "query": query,
+        # How many authors OpenAlex matched, of which `candidates` is the first
+        # page, and the institution an `--affiliation` was resolved to.
+        "total_candidates": total_candidates if total_candidates is not None else len(candidates),
+        "institution": dict(institution or {}),
         "source": "openalex-authors-api",
         "retrieved_at": (now or datetime.now()).isoformat(timespec="seconds"),
     }
@@ -685,7 +814,7 @@ def fetch_works(
         want = min(int(per_page), budget - len(collected))
         url = _with_mailto(
             f"{WORKS_URL}?filter={quote_plus(works_filter)}"
-            f"&per-page={want}&cursor={quote_plus(cursor)}",
+            f"&per-page={want}&cursor={quote_plus(cursor)}&select={WORK_FIELDS}",
             mailto,
         )
         data = _json_body(client.get(url, accept_type="api", timeout=60,

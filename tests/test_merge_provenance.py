@@ -557,6 +557,25 @@ check_true("...and as adopted without confirmation",
 check_true("...telling the reader what to check it against",
            "--openalex-author-id <id>" in unique_lines)
 
+# Written from 0.4.0 on: how many authors the query matched beyond the page
+# listed, which institution an --affiliation became, and a merged profile's
+# institution list cut down to something a person can read.
+crowded_lines = "\n".join(report._openalex_lines(
+    {"openalex": {"resolution": "ambiguous", "query": "display_name.search:Wang Wei",
+                  "source": "openalex", "retrieved_at": "2026-10-07", "total_candidates": 64,
+                  "institution": {"id": "I99065089", "display_name": "Tsinghua University"},
+                  "candidates": [{"display_name": "Wei Wang", "openalex_author_id": "A1",
+                                  "orcid": "", "works_count": 1512,
+                                  "institutions": [{"display_name": f"University {n}",
+                                                    "last_known": n > 8} for n in range(12)]}]}},
+    {}))
+check_true("Section 1 says how many authors matched when it lists only the first page",
+           "OpenAlex matched 64 authors under this query; the 1 listed below" in crowded_lines)
+check_true("...and which institution the affiliation was resolved to",
+           "institution filter: Tsinghua University (I99065089)" in crowded_lines)
+check_true("...and cuts a long institution list to three, current ones first",
+           "institutions University 9, University 10, University 11, and 9 more)" in crowded_lines)
+
 
 # ============================================================
 # 7. An OpenAlex id is evidence only where a record carries it

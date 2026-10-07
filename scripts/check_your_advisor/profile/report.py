@@ -1876,7 +1876,8 @@ def _coverage_lines(query: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-def _source_lines(counts: Mapping[str, Any], corpus_size: int) -> list[str]:
+def _source_lines(counts: Mapping[str, Any], corpus_size: int,
+                  pubmed_searched: bool = True) -> list[str]:
     """Which bibliographic source each record came from, and which confirmed it.
 
     Absent from a PubMed-only harvest, and that absence is printed as a sentence
@@ -1938,16 +1939,40 @@ def _source_lines(counts: Mapping[str, Any], corpus_size: int) -> list[str]:
         " + {total} under source name(s) the merge does not write ({names})",
         total=sum(other.values()), names=", ".join(f"{key} {value}" for key, value in other.items()),
     ) if other else ""
+    sources_line = en(
+        "- corpus sources: {harvested} harvested record(s) = {pubmed_only} PubMed "
+        "only + {openalex_only} OpenAlex only + {both} held by both{unknown}",
+        harvested=harvested, pubmed_only=pubmed_only, openalex_only=openalex_only, both=both, unknown=unknown)
+    if not pubmed_searched:
+        # A "PubMed corpus of 0 records" beside it would read as a search that
+        # found nothing, on a run that never asked PubMed.
+        return [sources_line,
+                en("- PubMed was not searched, so there is one denominator: the {harvested} "
+                   "OpenAlex record(s), {corpus_size} of them left after the exclusions below.",
+                   harvested=harvested, corpus_size=corpus_size)]
     return [
-        en("- corpus sources: {harvested} harvested record(s) = {pubmed_only} PubMed "
-           "only + {openalex_only} OpenAlex only + {both} held by both{unknown}",
-           harvested=harvested, pubmed_only=pubmed_only, openalex_only=openalex_only, both=both, unknown=unknown),
+        sources_line,
         en("- the two denominators are different numbers and both are stated: the "
            "PubMed corpus is {value} record(s), the merged corpus is {harvested}. The "
            "record exclusions listed below apply to both, and every count elsewhere "
            "in this report is over the {corpus_size} record(s) that survived them.",
            value=pubmed_only + both, harvested=harvested, corpus_size=corpus_size),
     ]
+
+
+def _institution_list(institutions: Sequence[Mapping[str, Any]], shown: int = 3) -> str:
+    """A candidate's institutions, current ones first, cut to `shown` with the rest counted.
+
+    A profile OpenAlex has merged from several people can list dozens, and the
+    line is there for a reader to recognise one person by, not to read a list.
+    """
+    names = [str(inst.get("display_name") or "") for inst in
+             sorted(institutions, key=lambda inst: not inst.get("last_known"))
+             if str(inst.get("display_name") or "")]
+    text = en(", ").join(names[:shown])
+    if len(names) > shown:
+        text += en(", and {more} more", more=len(names) - shown)
+    return text
 
 
 def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> list[str]:
@@ -2018,11 +2043,27 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
         # would otherwise contradict the line directly above it, and a printed 0
         # is a claim that OpenAlex returned nothing.
         counted = len(candidates) if readable or not candidates_raw else "?"
-        lines.append(
-            en("- openalex author resolution: {resolution} ({counted} candidate(s)); "
-               "query `{query}`; source {source}; retrieved {retrieved_at}",
-               resolution=resolution.get('resolution', '?'), counted=counted, query=resolution.get('query', ''), source=resolution.get('source', '?'), retrieved_at=resolution.get('retrieved_at') or en('not recorded'))
-        )
+        if resolution.get("resolution") == "explicit":
+            lines.append(en("- openalex author resolution: explicit — the id was given with "
+                            "`--openalex-author-id`, so no lookup was made and no candidates "
+                            "were listed"))
+        else:
+            lines.append(
+                en("- openalex author resolution: {resolution} ({counted} candidate(s)); "
+                   "query `{query}`; source {source}; retrieved {retrieved_at}",
+                   resolution=resolution.get('resolution', '?'), counted=counted, query=resolution.get('query', ''), source=resolution.get('source', '?'), retrieved_at=resolution.get('retrieved_at') or en('not recorded'))
+            )
+        # Both written by harvests from 0.4.0 on; a file from before has neither and
+        # prints neither line.
+        total = resolution.get("total_candidates")
+        if isinstance(total, int) and isinstance(counted, int) and total > counted:
+            lines.append(en("- OpenAlex matched {total} authors under this query; the {counted} "
+                            "listed below are its first page.", total=total, counted=counted))
+        institution = resolution.get("institution")
+        if isinstance(institution, Mapping) and institution.get("id"):
+            lines.append(en("- institution filter: {display_name} ({id}), with the units OpenAlex "
+                            "files under it", display_name=institution.get("display_name") or "?",
+                            id=institution["id"]))
         if resolution.get("resolution") == "unique":
             lines.append(
                 en("- **this id is the sole candidate of a fuzzy `display_name.search` and was adopted "
@@ -2048,9 +2089,8 @@ def _openalex_lines(query: Mapping[str, Any], identity: Mapping[str, Any]) -> li
             # all. An unusable list prints "not recorded" in the slot rather than
             # an empty string, which would read as an author with no affiliation.
             institutions_raw = candidate.get("institutions")
-            institutions = (", ".join(
-                str(inst.get("display_name", "")) for inst in institutions_raw
-            ) if _is_record_list(institutions_raw) else "") or en("not recorded")
+            institutions = (_institution_list(institutions_raw)
+                            if _is_record_list(institutions_raw) else "") or en("not recorded")
             lines.append(
                 en("  - candidate {index}/{counted}: {display_name} (id {openalex_author_id}; "
                    "orcid {orcid}; works {works_count}; institutions {institutions})",
@@ -2541,7 +2581,7 @@ def _provenance_body(prov: dict[str, Any]) -> list[str]:
         *inconsistency_unreadable,
         *_unreadable_lines(_readable_block(prov.get("unreadable"))),
         *(_coverage_lines(query) if pubmed_searched else []),
-        *_source_lines(counts, prov["corpus_size"]),
+        *_source_lines(counts, prov["corpus_size"], pubmed_searched),
         *_openalex_lines(query, identity),
         # All three are PubMed-side counts and say so, because the merged corpus
         # is a different and larger number and the two were once printed under
@@ -4353,6 +4393,25 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
         sources=en(" and ").join(source_names.get(s, s) for s in sources) or "?",
         people=prov.get("n_people", "?")))
 
+    # Second, because it is the one line that can void the rest: a name shared by
+    # several people produces a normal-looking page and a normal-looking score.
+    # Measured on a real OpenAlex profile for a common name: 18 clusters over 28
+    # records, public health beside aerospace guidance, under a 5-star score.
+    clusters = metrics.get("s19") or {}
+    if clusters and not clusters.get("suppressed") and clusters.get("n_clusters") == 1:
+        lines.append(en(
+            "Co-author clusters with the PI taken out: all {records} records are tied together by "
+            "shared co-authors, in one cluster (Section 19).",
+            records=clusters.get("denominator", "?")))
+    elif clusters and not clusters.get("suppressed") and clusters.get("n_clusters"):
+        lines.append(en(
+            "Co-author clusters with the PI taken out: {n} over {records} records, the largest "
+            "holding {largest}, and {single} records sharing no co-author with any other "
+            "(Section 19). Clusters in unrelated fields usually mean several people share the "
+            "name; read that section before quoting anything here.",
+            n=clusters["n_clusters"], records=clusters.get("denominator", "?"),
+            largest=clusters.get("largest_size", "?"), single=clusters.get("records_in_singletons", "?")))
+
     roster = metrics.get("s2") or {}
     rows = roster.get("rows") or []
     total_slots = sum(int(row.get("n_first_slots") or 0) for row in rows)
@@ -4402,7 +4461,12 @@ def glance_lines(report: Mapping[str, Any]) -> list[str]:
             right=int(buckets.get("right_censored", 0) or 0) + int(buckets.get("both_censored", 0) or 0)))
 
     position = metrics.get("s7") or {}
-    if position.get("measured") and not position.get("suppressed"):
+    if position and not position.get("measured"):
+        lines.append(en(
+            "The PI's own byline position: not measured — harvest keeps only papers where the PI "
+            "is first, last or corresponding author, so that filter, not the record, would decide "
+            "it (Section 7)."))
+    elif position.get("measured") and not position.get("suppressed"):
         counts = position.get("counts") or {}
         lines.append(en(
             "The PI's own byline position: last author on {last} of {denominator} records, first "

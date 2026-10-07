@@ -122,6 +122,42 @@ def client_with(script, **kw) -> tuple[RobustHTTPClient, FakeOpener]:
     return c, opener
 
 
+
+class RecordingOpener(FakeOpener):
+    """FakeOpener that also keeps the headers each request was sent with."""
+
+    def __init__(self, script):
+        super().__init__(script)
+        self.headers: list[dict] = []
+
+    def open(self, req, timeout=None):
+        self.headers.append({key.lower(): value for key, value in req.header_items()})
+        return super().open(req, timeout)
+
+
+def sent_headers(url: str, key: str | None) -> dict:
+    previous = os.environ.pop(http_client.OPENALEX_KEY_ENV, None)
+    if key is not None:
+        os.environ[http_client.OPENALEX_KEY_ENV] = key
+    try:
+        c = RobustHTTPClient(backoff_factor=0.0)
+        opener = RecordingOpener([FakeRaw(200, {"Content-Type": "application/json"}, b"{}")])
+        c._opener = lambda proxy, allow_redirects: opener  # noqa: SLF001
+        c.get(url, accept_type="api")
+        return opener.headers[0]
+    finally:
+        os.environ.pop(http_client.OPENALEX_KEY_ENV, None)
+        if previous is not None:
+            os.environ[http_client.OPENALEX_KEY_ENV] = previous
+
+
+print("OpenAlex key")
+check("a key in OPENALEX_API_KEY goes to api.openalex.org as a bearer token",
+      sent_headers("https://api.openalex.org/works?filter=x", "k-123").get("authorization"), "Bearer k-123")
+check("...and to no other host",
+      "authorization" in sent_headers("https://api.crossref.org/journals/1234-5678", "k-123"), False)
+check("with no key set, nothing is sent", "authorization" in sent_headers("https://api.openalex.org/works", None), False)
+
 print("Headers")
 h = _random_headers("pdf")
 check_true("no brotli is advertised, because nothing here can decode it",

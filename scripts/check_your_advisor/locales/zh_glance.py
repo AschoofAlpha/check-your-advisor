@@ -50,4 +50,12 @@ MESSAGES = {
     'nothing passed identity verification, so this may be several people': '没有一条记录通过身份核验，所以这可能是好几个人',
     'the target name was not found on the bylines': '署名里没有找到目标姓名',
     'see the section it names': '见它所指的那一节',
+    '- OpenAlex matched {total} authors under this query; the {counted} listed below are its first page.': '- OpenAlex 按这个查询一共匹配到 {total} 位作者，下面列出的 {counted} 位是第一页。',
+    '- institution filter: {display_name} ({id}), with the units OpenAlex files under it': '- 机构筛选：{display_name}（{id}），包括 OpenAlex 归在它下面的单位',
+    ', and {more} more': '等，另有 {more} 个',
+    '- PubMed was not searched, so there is one denominator: the {harvested} OpenAlex record(s), {corpus_size} of them left after the exclusions below.': '- 没有检索 PubMed，所以只有一个分母：{harvested} 条 OpenAlex 记录，经过下面的排除后剩 {corpus_size} 条。',
+    '- openalex author resolution: explicit — the id was given with `--openalex-author-id`, so no lookup was made and no candidates were listed': '- OpenAlex 作者解析：直接指定——作者 ID 是用 `--openalex-author-id` 给的，没有做查询，也没有列候选',
+    'Co-author clusters with the PI taken out: {n} over {records} records, the largest holding {largest}, and {single} records sharing no co-author with any other (Section 19). Clusters in unrelated fields usually mean several people share the name; read that section before quoting anything here.': '去掉 PI 之后按共同作者分簇：{records} 条记录分成 {n} 簇，最大的一簇 {largest} 条，另有 {single} 条和其他记录没有任何共同作者（第 19 节）。如果各簇分属互不相干的领域，通常说明是几个同名的人；引用这里任何一个数之前，先读那一节。',
+    "The PI's own byline position: not measured — harvest keeps only papers where the PI is first, last or corresponding author, so that filter, not the record, would decide it (Section 7).": 'PI 本人在署名里的位置：未测量——harvest 只保留 PI 做一作、末位或通讯作者的论文，位置是这个筛选条件定的，不是记录本身定的（第 7 节）。',
+    'Co-author clusters with the PI taken out: all {records} records are tied together by shared co-authors, in one cluster (Section 19).': '去掉 PI 之后按共同作者分簇：{records} 条记录全部通过共同作者连在一起，只有 1 簇（第 19 节）。',
 }

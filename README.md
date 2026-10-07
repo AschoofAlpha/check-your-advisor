@@ -42,7 +42,6 @@ below it define every number and say what it cannot mean.
 - who the first-author slots went to, and how concentrated they are
 - how long a newcomer waits before getting one
 - how long people stay before they stop appearing
-- where the PI sits in their own bylines — last, corresponding, or doing the work
 - how much comes out per year, and whether it goes to the same few journals
 - citation counts and an h-index, with the coverage they were computed over
 - one composite score out of 100, with every component's raw input printed
@@ -175,8 +174,11 @@ The PubMed record wins where both hold a paper — its record carries the
 affiliation strings and corresponding-author emails every identity check reads,
 and OpenAlex's does not. Every record says which source it came from and which
 sources hold it, and Section 1 prints both denominators, because a merged corpus
-and a PubMed corpus are different numbers. Neither API needs a key; `--email`
-becomes OpenAlex's `mailto`, which is a rate-limit pool and not authentication.
+and a PubMed corpus are different numbers. Neither API needs a key. OpenAlex
+bills its API against a free daily budget: about $0.10 a day without a key,
+enough for several advisors, and ten times that with a free key from
+openalex.org/settings/api. Put the key in the environment variable
+`OPENALEX_API_KEY` and every OpenAlex request carries it; nothing else does.
 
 ## Three tables you fill in by hand
 
@@ -406,7 +408,7 @@ python tests/run_all.py
 python tests/run_all.py --block-third-party
 ```
 
-5248 assertions across 38 files with PyMuPDF installed, 5245 without it,
+5272 assertions across 38 files with PyMuPDF installed, 5269 without it,
 measured 2026-10-07 by the first command above. That command re-measures
 whichever of the two this machine can produce, on every run, and fails if this
 sentence has drifted, which is why they are numbers rather than promises. The
@@ -438,6 +440,10 @@ differently without them, and all three are the cases that need a real PDF file.
   was served.
 - Journal name matching falls back to a token heuristic for corpora harvested
   before ISSN capture existed. Re-harvest to get the exact join.
+- Section 7, where the PI sits in their own bylines, is not measured on a corpus
+  `harvest` builds. Harvest keeps only the papers where the PI is first, last or
+  corresponding author, so the positions would be the filter's choice rather than
+  the PI's. The section and the summary both say so instead of printing a count.
 
 ## License
 

@@ -146,6 +146,20 @@ check_true("time to a first slot carries the people still without one, as Sectio
            any(f"median {report._fmt_number(wait['median'])} years over the {wait['denominator']} people"
                in line and f"leaves out {len(wait['still_without_lead'])} more with none so far" in line
            for line in lines))
+clusters = metrics["s19"]
+check_true("the co-author clusters are summarised second, with Section 19's own counts",
+           lines[1].startswith(f"- Co-author clusters with the PI taken out: {clusters['n_clusters']} over "
+                               f"{clusters['denominator']} records, the largest holding "
+                               f"{clusters['largest_size']}")
+           if clusters["n_clusters"] > 1 else
+           lines[1].startswith(f"- Co-author clusters with the PI taken out: all {clusters['denominator']} "
+                               "records are tied together"))
+filtered = lab()
+filtered["position_filtered"] = True
+filtered_lines = glance_block(report.render_markdown(report.build_report(filtered, {"author_name": TARGET}, None, NOW)))
+check_true("on a position-filtered corpus, every harvest's, the byline line says it was not measured and why",
+           any(line.startswith("- The PI's own byline position: not measured — harvest keeps only papers")
+               for line in filtered_lines))
 check("no line passes judgement",
       [line for line in lines if re.search(r"\b(good|bad|recommend|avoid|safe|risky)\b", line, re.I)], [])
 

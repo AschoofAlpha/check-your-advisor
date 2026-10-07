@@ -147,10 +147,15 @@ check("an ORCID is not mistaken for an author id",
 
 print("\n--- one candidate is adopted ---")
 
-client = StubClient({"api.openalex.org/authors": ok({
-    "meta": {"count": 1},
-    "results": [api_author("5023888391", "Guangwei Zhu", orcid="0000-0002-1825-0097", works=43)],
-})})
+INSTITUTION = ok({"meta": {"count": 1}, "results": [
+    {"id": "https://openalex.org/I1", "display_name": "Example University"}]})
+client = StubClient({
+    "api.openalex.org/institutions": INSTITUTION,
+    "api.openalex.org/authors": ok({
+        "meta": {"count": 1},
+        "results": [api_author("5023888391", "Guangwei Zhu", orcid="0000-0002-1825-0097", works=43)],
+    }),
+})
 resolved = openalex.resolve_author(client, "Zhu Guangwei", affiliation="Example University",
                                    mailto="me@example.edu")
 
@@ -168,11 +173,25 @@ check("the institution is not duplicated by the two OpenAlex spellings of it",
 check("the source is recorded, because this is somebody else's assertion",
       resolved["source"], "openalex-authors-api")
 check_true("...with the date it was fetched", resolved["retrieved_at"])
-check_true("the name reached the filter", "display_name.search" in client.calls[0])
-check_true("the affiliation reached the filter as OpenAlex's own institution filter",
-           "last_known_institutions.display_name.search" in client.calls[0])
-check_true("the mailto is sent", "mailto=me%40example.edu" in client.calls[0])
-check("exactly one request was made", len(client.calls), 1)
+# OpenAlex answers `last_known_institutions.display_name.search` with HTTP 400
+# now (checked against the live API): an institution is filtered by id only. So
+# the affiliation is looked up as an institution first and its id filters the
+# authors, through `lineage` so departments and hospitals under it count too.
+check_true("the affiliation is looked up as an institution first",
+           "institutions?search=Example+University" in client.calls[0])
+check_true("the name reached the authors filter", "display_name.search" in client.calls[1])
+check_true("the affiliation reached it as OpenAlex's institution id, lineage included",
+           "last_known_institutions.lineage%3AI1" in client.calls[1])
+check("the name-search institution filter OpenAlex rejects is not sent",
+      [url for url in client.calls if "last_known_institutions.display_name" in url], [])
+check("the resolution records which institution it used",
+      resolved["institution"], {"id": "I1", "display_name": "Example University"})
+check("...and how many authors OpenAlex matched", resolved["total_candidates"], 1)
+check_true("the mailto is sent", all("mailto=me%40example.edu" in url for url in client.calls))
+check("exactly two requests were made: the institution, then the authors", len(client.calls), 2)
+check_true("each request asks only for the fields the parser reads",
+           "select=id%2Cdisplay_name" in client.calls[0].replace(",", "%2C")
+           and "select=" + openalex.AUTHOR_FIELDS in client.calls[1])
 
 # `mailto` is optional and is not a key. Omitted means the documented anonymous
 # request, not a request with an empty parameter that OpenAlex has to parse.
@@ -180,7 +199,18 @@ bare = StubClient({"authors": ok({"results": [api_author("1", "Solo Person")]})}
 openalex.resolve_author(bare, "Solo Person")
 check_false("no mailto is sent when none was configured", "mailto=" in bare.calls[0])
 check_false("and no institution filter when no affiliation was given",
-            "last_known_institutions" in bare.calls[0])
+            "last_known_institutions.lineage" in bare.calls[0])
+check("...and no institution lookup either", len(bare.calls), 1)
+
+unknown = StubClient({"/institutions?": ok({"meta": {"count": 0}, "results": []}),
+                      "authors": ok({"results": [api_author("1", "Solo Person")]})})
+found = openalex.resolve_author(unknown, "Solo Person", affiliation="Nowhere Institute")
+check("an institution OpenAlex does not know leaves the author lookup unfiltered",
+      ("last_known_institutions.lineage" in unknown.calls[-1], found["resolution"]), (False, "unique"))
+down = StubClient({"/institutions?": None, "authors": ok({"results": [api_author("1", "Solo Person")]})})
+failed = openalex.resolve_author(down, "Solo Person", affiliation="Example University")
+check("a failed institution lookup is a failed resolution, with no unfiltered author query sent",
+      (failed["resolution"], [url for url in down.calls if "/authors" in url]), ("error", []))
 
 
 # ============================================================
@@ -206,6 +236,50 @@ check_false("the most productive candidate was not silently chosen",
             ambiguous["openalex_author_id"] == "A222")
 check_false("neither was the one that happens to carry an ORCID",
             ambiguous["openalex_author_id"] == "A111")
+
+# A common name returns far more than one page. "Wang Wei" with Tsinghua's id
+# matched 64 authors on the live API and the first page held 10; the record and
+# the log have to say 64, or ten candidates read as the whole field.
+crowd = StubClient({"authors": ok({"meta": {"count": 64}, "results": [
+    api_author(str(n), "Wei Wang") for n in range(100, 110)]})})
+crowded = openalex.resolve_author(crowd, "Wang Wei")
+check("the record keeps how many authors OpenAlex matched, not just the page it listed",
+      (crowded["total_candidates"], len(crowded["candidates"])), (64, 10))
+
+# The same live query's first candidate claimed more than twenty last-known
+# institutions in three countries: several people merged into one profile.
+merged = api_author("999", "Wei Wang")
+merged["last_known_institutions"] = [{"id": f"https://openalex.org/I{n}",
+                                      "display_name": f"University {n}"} for n in range(12)]
+summary = openalex.institution_summary(openalex.author_candidate(merged)["institutions"])
+check_true("a long institution list is cut to a few, with the total said",
+           summary.count("、") == 2 and "共 13 个机构" in summary)
+check_true("...the current institutions first",
+           summary.startswith("University 0"))
+_records: list[logging.LogRecord] = []
+_capture = logging.Handler()
+_capture.emit = _records.append
+_openalex_log = logging.getLogger("check_your_advisor.openalex")
+_openalex_log.addHandler(_capture)
+_level = logging.getLogger("check_your_advisor").level
+logging.getLogger("check_your_advisor").setLevel(logging.WARNING)
+huge = api_author("998", "Wei Wang")
+huge["last_known_institutions"] = [{"id": f"https://openalex.org/I{n}",
+                                    "display_name": f"University {n}"} for n in range(40)]
+try:
+    openalex.resolve_author(StubClient({"authors": ok({"results": [merged]})}), "Wang Wei")
+    quiet = [record.getMessage() for record in _records]
+    openalex.resolve_author(StubClient({"authors": ok({"results": [huge]})}), "Wang Wei")
+finally:
+    _openalex_log.removeHandler(_capture)
+    logging.getLogger("check_your_advisor").setLevel(_level)
+check("a dozen institutions is an ordinary career and raises no merged-profile line",
+      any("并成了一个档案" in message for message in quiet), False)
+check_true("forty is not: adopting that profile says it is probably several people",
+           any("并成了一个档案" in record.getMessage() for record in _records))
+check_true("...and the institution the affiliation matched is listed first when there is one",
+           openalex.institution_summary(openalex.author_candidate(merged)["institutions"],
+                                        "Example University").startswith("Example University"))
 
 print("\n--- nobody, versus could not ask ---")
 
@@ -606,7 +680,7 @@ def _install(stub: StubClient) -> None:
 
 
 try:
-    _install(StubClient({"authors": ok({"results": [
+    _install(StubClient({"/institutions?": INSTITUTION, "authors": ok({"results": [
         api_author("5023888391", "Guangwei Zhu", orcid="0000-0002-1825-0097", works=43)]})}))
     _identity: dict = {}
     _cfg = {"author_name": "Zhu Guangwei", "affiliation": "Example University",

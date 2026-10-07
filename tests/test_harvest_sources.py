@@ -102,7 +102,10 @@ class Client:
 
     def get(self, url: str, **kwargs):
         self.calls.append(url)
-        results = self.authors if "/authors" in url else self.works
+        if "/institutions?" in url:
+            results = [{"id": "https://openalex.org/I20231570", "display_name": "Peking University"}]
+        else:
+            results = self.authors if "/authors" in url else self.works
         payload = {"meta": {"count": len(results), "next_cursor": None}, "results": results}
         return Response(200, {"Content-Type": "application/json"}, json.dumps(payload).encode("utf-8"))
 
@@ -200,6 +203,11 @@ check_true("Section 1 says PubMed was not searched", "PubMed: not searched" in t
 check("...and prints no esearch line over a search that did not happen", "esearch term" in text, False)
 check("...nor PubMed coverage or efetch counts",
       ("PubMed corpus coverage" in text, "PubMed records: fetched" in text), (False, False))
+check("...nor a 'PubMed corpus of 0 records' beside the OpenAlex one, which reads as a search that found nothing",
+      ("the two denominators" in text, "PubMed was not searched, so there is one denominator" in text),
+      (False, True))
+check_true("...and an id given on the command line is said to have needed no lookup",
+           "explicit — the id was given with `--openalex-author-id`, so no lookup was made" in text)
 
 ambiguous = Client([], authors=[candidate("A1", "Peking University", "Computer Vision", "Computer Science"),
                                 candidate("A2", "Peking University", "Cardiology", "Medicine")])

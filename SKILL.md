@@ -1,6 +1,6 @@
 ---
 name: check-your-advisor
-description: 查导师：把 PubMed 或 OpenAlex（全学科）里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久、老板自己站在署名的哪个位置。只给证据，不替你下结论。Report what a principal investigator's publication record shows about being their student, from PubMed or OpenAlex (every field) — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, where the PI sits in their own bylines, and the output and venue pattern, every count printed with its denominator. Also computes citation counts, an h-index, citation percentiles in OpenAlex topic-year cells, a slope with its interval, and a 0-100 composite score under an editable weight table; `compare` ranks corpora with star and letter bands. Journal impact factor, JCR quartile, CAS partition, the graduate roster and student evaluations are joined from CSV tables the user fills in by hand, and nothing is scraped. Nine verbs — `harvest`, `cite`, `journal-worklist`, `journal-risk`, `profile`, `compare`, `diff`, `download`, `clean-cache`. It never says whether an advisor is good.
+description: 查导师：把 PubMed 或 OpenAlex（全学科）里的发表记录读成带分母的事实——谁在这个组、一作名额给了谁、新人等多久、人待多久。只给证据，不替你下结论。Report what a principal investigator's publication record shows about being their student, from PubMed or OpenAlex (every field) — who is in the group, who gets the first-author slots, how long a newcomer waits for one, how long people stay, and the output and venue pattern, every count printed with its denominator. Also computes citation counts, an h-index, citation percentiles in OpenAlex topic-year cells, a slope with its interval, and a 0-100 composite score under an editable weight table; `compare` ranks corpora with star and letter bands. Journal impact factor, JCR quartile, CAS partition, the graduate roster and student evaluations are joined from CSV tables the user fills in by hand, and nothing is scraped. Nine verbs — `harvest`, `cite`, `journal-worklist`, `journal-risk`, `profile`, `compare`, `diff`, `download`, `clean-cache`. It never says whether an advisor is good.
 when_to_use: Use when someone is choosing or vetting a PhD or master's advisor or lab, asks what a PI's record shows, or wants advisors compared, ranked or scored. Typical requests include check my advisor, evaluate a PI, what is this lab like, should I join this lab, first-author slots, compare two advisors, 查导师, 选导师, 对比两个导师, 导师打分, 这个老板怎么样, 实验室发表记录, 期刊分区, 影响因子, 中科院分区, 毕业名单, 学位论文.
 allowed-tools: Bash(python3 "${CLAUDE_SKILL_DIR}/scripts/run.py" *) Bash(python "${CLAUDE_SKILL_DIR}/scripts/run.py" *)
 model: inherit
@@ -13,13 +13,12 @@ by the lab, and no way to check any of it. This reads what PubMed records about
 that person — or OpenAlex, which covers every field, when the advisor works
 outside biomedicine — and reports it back as facts with denominators.
 
-It answers six questions from the publication record alone:
+It answers five questions from the publication record alone:
 
 - who has appeared in this group
 - who the first-author slots went to
 - how long a newcomer waits before getting one
 - how long people stay before they stop appearing
-- where the PI sits in their own bylines
 - how much comes out per year, and whether it goes to the same few journals
 
 And two more once you supply a table it cannot fetch: what those journals are
@@ -236,9 +235,14 @@ identity check downstream reads and OpenAlex's does not. Every record carries
 it), and Section 1 prints both denominators: the PubMed corpus and the merged
 corpus are different numbers and are never printed as one.
 
-`--email` is passed to OpenAlex as `mailto`. It is not a key — OpenAlex has
-none — it only moves the request into a faster rate-limit pool, and it is
-omitted when not configured.
+No key is needed, but OpenAlex now bills its API against a daily budget:
+about $0.10 a day without a key, which covers several advisors (an author or
+institution search costs $0.001, a page of works $0.0001, a single record
+nothing), and ten times that with a free key from openalex.org/settings/api.
+With the key in `OPENALEX_API_KEY` every request to api.openalex.org carries it
+as a bearer token and no other host sees it. A `429` from OpenAlex means the
+budget is spent until midnight UTC, and the log says so. `--email` is still
+sent as `mailto` when given; it is not a key.
 
 Separate commands because the two network-bound steps — harvesting the papers
 and fetching the citation counts — are slow, while the report is instant and
@@ -716,6 +720,15 @@ university are usually told apart fastest by what they work on.
 
 **One candidate is adopted. Two or more are listed and none is adopted.** Pick
 the one you recognise and re-run with `--openalex-author-id A5023888391`.
+
+`--affiliation` is looked up as an OpenAlex institution first (OpenAlex filters
+authors by institution id only) and the log names the institution it became. A
+common name matches far more than the ten candidates listed — "Wang Wei" at
+Tsinghua matched 64 — and the log gives the total. A candidate whose profile
+lists thirty or more institutions is usually several people OpenAlex merged into
+one, and the log says so: steer the user to `--orcid` or `--author-email` rather
+than picking such a profile, and if one is used anyway, Section 19 and the
+summary line built from it are where the merge shows.
 Choosing the most productive candidate automatically would decide an identity
 question on a proxy, which is the same error as accepting a bare name match, and
 it would leave no sign in the report that a choice had been made.

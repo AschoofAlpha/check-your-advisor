@@ -218,9 +218,11 @@ def fetch_openalex(client: RobustHTTPClient, doi: str, mailto: str = "") -> int 
     """
     if not doi:
         return None
-    url = f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}"
+    # `select=` keeps the answer to the one field read here: a full work record
+    # carries its whole reference list and abstract.
+    url = f"https://api.openalex.org/works/doi:{quote(doi, safe='/')}?select=id,cited_by_count"
     if mailto:
-        url += f"?mailto={quote_plus(mailto)}"
+        url += f"&mailto={quote_plus(mailto)}"
     data = _json_body(
         client.get(url, accept_type="api", timeout=30,
                    extra_headers=polite_headers(mailto)),
